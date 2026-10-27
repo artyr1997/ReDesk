@@ -75,8 +75,9 @@ enum Wallpapers {
 
     static var current: Int? {
         guard let screen = NSScreen.screens.first,
-              let url = NSWorkspace.shared.desktopImageURL(for: screen)?.standardizedFileURL else { return nil }
-        return all.firstIndex { $0.standardizedFileURL == url }
+              let url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
+        // by name: the same picture may have been set from the repo's folder rather than the app's
+        return all.firstIndex { $0.lastPathComponent == url.lastPathComponent }
     }
 
     static func show(_ index: Int) {
@@ -218,7 +219,6 @@ final class WordView: DeskView {
 /// The wallpapers as dots down the left edge; the one on the desktop is a diamond.
 final class WallpaperView: DeskView {
     static let dot: CGFloat = 6
-    static let diamond: CGFloat = 10
 
     /// distance between dots, top to bottom
     var spacing: CGFloat = 52
@@ -255,15 +255,7 @@ final class WallpaperView: DeskView {
         for i in Wallpapers.all.indices {
             let c = centre(i)
             if i == chosen {
-                let r = Self.diamond / 2
-                let path = NSBezierPath()
-                path.move(to: NSPoint(x: c.x, y: c.y + r))
-                path.line(to: NSPoint(x: c.x + r, y: c.y))
-                path.line(to: NSPoint(x: c.x, y: c.y - r))
-                path.line(to: NSPoint(x: c.x - r, y: c.y))
-                path.close()
-                strong.setFill()
-                path.fill()
+                drawDiamond(at: c)
             } else {
                 let r = Self.dot / 2
                 faint.setFill()
@@ -271,6 +263,21 @@ final class WallpaperView: DeskView {
             }
         }
     }
+}
+
+let diamondSize: CGFloat = 13
+
+/// The mark for "this one" / "now", in the strong white.
+func drawDiamond(at c: NSPoint) {
+    let r = diamondSize / 2
+    let path = NSBezierPath()
+    path.move(to: NSPoint(x: c.x, y: c.y + r))
+    path.line(to: NSPoint(x: c.x + r, y: c.y))
+    path.line(to: NSPoint(x: c.x, y: c.y - r))
+    path.line(to: NSPoint(x: c.x - r, y: c.y))
+    path.close()
+    strong.setFill()
+    path.fill()
 }
 
 /// A thin rounded bar: `filled` of it in the strong white, from the left (or the bottom), the rest faint.
@@ -286,7 +293,7 @@ func drawBar(in rect: NSRect, filled: Double, vertical: Bool) {
     NSBezierPath(roundedRect: done, xRadius: radius, yRadius: radius).fill()
 }
 
-/// How much of today has gone, midnight to midnight, with a mark at noon.
+/// Today, midnight to midnight, as a faint line with a mark at noon; a diamond stands at now.
 final class DayView: DeskView {
     override func draw(_ dirtyRect: NSRect) {
         let calendar = Calendar.current
@@ -294,9 +301,12 @@ final class DayView: DeskView {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         let gone = now.timeIntervalSince(start) / end.timeIntervalSince(start)
-        drawBar(in: NSRect(x: 0, y: bounds.midY - barWidth / 2, width: bounds.width, height: barWidth), filled: gone, vertical: false)
+        drawBar(in: NSRect(x: 0, y: bounds.midY - barWidth / 2, width: bounds.width, height: barWidth), filled: 0, vertical: false)
         strong.setFill()
         NSRect(x: bounds.midX - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
+        // kept inside the window so it is never cut at midnight's ends
+        let r = diamondSize / 2
+        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY))
     }
 
     override func menuItems() -> [NSMenuItem] {
