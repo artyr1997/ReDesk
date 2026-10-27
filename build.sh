@@ -8,6 +8,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -o "$APP/Contents/MacOS/ReDesk" Sources/main.swift
 cp Info.plist "$APP/Contents/"
 cp Resources/* "$APP/Contents/Resources/"
+cp -R wallpapers "$APP/Contents/Resources/"
 codesign --force -s - "$APP"
 if [ "$1" = "--install" ]; then
 	DEST=/Applications/ReSpace

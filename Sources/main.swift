@@ -1,7 +1,11 @@
-// ReDesk: the Re apps as words in the corners of the desktop.
-// Each word is a small borderless window just above the desktop icons;
-// a click opens its app; a right click can open it at login or quit.
+// ReDesk: the Re apps and a few quiet gauges on the desktop.
+// Corners: the apps as words (a click opens one). Left edge: the wallpapers, as dots.
+// Top: how much of the day has gone. Right edge: the battery.
+// Each piece is a small borderless window just above the desktop icons;
+// a right click on any of them can open ReDesk at login or quit it.
 import AppKit
+import Carbon.HIToolbox
+import IOKit.ps
 import ServiceManagement
 
 struct Corner {
@@ -24,6 +28,11 @@ let letterSize: CGFloat = 20
 let letterStep: CGFloat = 32
 let columnWidth: CGFloat = 42
 
+/// Gauges: the empty part at 25%, the filled part (and the chosen wallpaper) at 50%.
+let faint = NSColor.white.withAlphaComponent(0.25)
+let strong = NSColor.white.withAlphaComponent(0.5)
+let barWidth: CGFloat = 4
+
 /// The apps' side-button font, shipped inside ReDesk; the system font if it can't be loaded.
 let letterFont: NSFont = {
     if let url = Bundle.main.url(forResource: "NotoSansJP", withExtension: "woff") {
@@ -40,7 +49,131 @@ func open(_ corner: Corner) {
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
 
-final class WordView: NSView {
+// ── the desk's layout: the apps' insets, 5% of the width from the sides, 6.25% of the height ──
+
+struct Layout {
+    let area: NSRect
+
+    var leftX: CGFloat { area.minX + area.width * 0.05 }
+    var rightX: CGFloat { area.maxX - area.width * 0.05 }
+    var topWord: CGFloat { area.maxY - area.height * 0.0625 }
+    var bottomWord: CGFloat { area.minY + area.height * 0.0625 }
+    /// the dots on the left and the battery on the right share this length, around the middle
+    var sideLength: CGFloat { area.height * 0.22 }
+}
+
+// ── wallpapers ──
+
+enum Wallpapers {
+    static let all: [URL] = {
+        guard let folder = Bundle.main.url(forResource: "wallpapers", withExtension: nil) else { return [] }
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        let images = ["jpg", "jpeg", "png", "heic"]
+        return files.filter { images.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }()
+
+    static var current: Int? {
+        guard let screen = NSScreen.screens.first,
+              let url = NSWorkspace.shared.desktopImageURL(for: screen)?.standardizedFileURL else { return nil }
+        return all.firstIndex { $0.standardizedFileURL == url }
+    }
+
+    static func show(_ index: Int) {
+        guard all.indices.contains(index) else { return }
+        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+            .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+            .allowClipping: true,
+        ]
+        for screen in NSScreen.screens {
+            try? NSWorkspace.shared.setDesktopImageURL(all[index], for: screen, options: options)
+        }
+        NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
+    }
+
+    /// One step up or down the list, round and round.
+    static func step(_ delta: Int) {
+        guard !all.isEmpty else { return }
+        let from = current ?? (delta > 0 ? -1 : 0)
+        show((from + delta + all.count) % all.count)
+    }
+}
+
+extension Notification.Name {
+    static let wallpaperChanged = Notification.Name("ReDeskWallpaperChanged")
+}
+
+/// ⌃⌥↑ / ⌃⌥↓ step through the wallpapers from anywhere (Carbon hot keys need no permissions).
+enum HotKeys {
+    private static var refs: [EventHotKeyRef?] = []
+
+    static func register() {
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var id = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
+            Wallpapers.step(id.id == 1 ? -1 : 1)
+            return noErr
+        }, 1, &spec, nil, nil)
+        let modifiers = UInt32(controlKey | optionKey)
+        for (number, key) in [(UInt32(1), kVK_UpArrow), (UInt32(2), kVK_DownArrow)] {
+            var ref: EventHotKeyRef?
+            RegisterEventHotKey(UInt32(key), modifiers, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
+                                GetApplicationEventTarget(), 0, &ref)
+            refs.append(ref)
+        }
+    }
+}
+
+// ── battery ──
+
+/// 0…1, or nil on a Mac without one.
+func batteryLevel() -> Double? {
+    guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+          let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
+    for source in sources {
+        guard let d = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
+              d[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
+              let now = d[kIOPSCurrentCapacityKey] as? Double,
+              let max = d[kIOPSMaxCapacityKey] as? Double, max > 0 else { continue }
+        return min(now / max, 1)
+    }
+    return nil
+}
+
+// ── the pieces ──
+
+class DeskView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// items of this piece that go above the common ones
+    func menuItems() -> [NSMenuItem] { [] }
+
+    override func rightMouseDown(with event: NSEvent) {
+        let menu = NSMenu()
+        let own = menuItems()
+        own.forEach(menu.addItem)
+        if !own.isEmpty { menu.addItem(.separator()) }
+        let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+        login.target = self
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(withTitle: "Quit ReDesk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    /// Starting with the Mac is up to the user; macOS may ask to approve it in Login Items.
+    @objc private func toggleLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled { try service.unregister() } else { try service.register() }
+        } catch {
+            SMAppService.openSystemSettingsLoginItems()
+        }
+    }
+}
+
+final class WordView: DeskView {
     let corner: Corner
     private var hovered = false { didSet { needsDisplay = true } }
 
@@ -59,30 +192,14 @@ final class WordView: NSView {
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
     override func mouseDown(with event: NSEvent) { open(corner) }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func rightMouseDown(with event: NSEvent) {
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Open \(corner.app)", action: #selector(openApp), keyEquivalent: "").target = self
-        menu.addItem(.separator())
-        let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
-        login.target = self
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(withTitle: "Quit ReDesk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    override func menuItems() -> [NSMenuItem] {
+        let item = NSMenuItem(title: "Open \(corner.app)", action: #selector(openApp), keyEquivalent: "")
+        item.target = self
+        return [item]
     }
 
     @objc private func openApp() { open(corner) }
-
-    /// Starting with the Mac is up to the user; macOS may ask to approve it in Login Items.
-    @objc private func toggleLogin() {
-        let service = SMAppService.mainApp
-        do {
-            if service.status == .enabled { try service.unregister() } else { try service.register() }
-        } catch {
-            SMAppService.openSystemSettingsLoginItems()
-        }
-    }
 
     override func draw(_ dirtyRect: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
@@ -98,45 +215,185 @@ final class WordView: NSView {
     }
 }
 
-final class WordWindow: NSWindow {
-    let corner: Corner
+/// The wallpapers as dots down the left edge; the one on the desktop is a diamond.
+final class WallpaperView: DeskView {
+    static let dot: CGFloat = 6
+    static let diamond: CGFloat = 10
 
-    init(corner: Corner) {
-        self.corner = corner
+    /// distance between dots, top to bottom
+    var spacing: CGFloat = 52
+
+    private var chosen = Wallpapers.current
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .wallpaperChanged, object: nil)
+        // the wallpaper can also change in System Settings
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(refresh), name: Notification.Name("com.apple.desktop"), object: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    @objc func refresh() {
+        chosen = Wallpapers.current
+        needsDisplay = true
+    }
+
+    private func centre(_ i: Int) -> NSPoint {
+        let first = bounds.midY + spacing * CGFloat(Wallpapers.all.count - 1) / 2
+        return NSPoint(x: bounds.midX, y: first - spacing * CGFloat(i))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let y = convert(event.locationInWindow, from: nil).y
+        let nearest = Wallpapers.all.indices.min { abs(centre($0).y - y) < abs(centre($1).y - y) }
+        if let nearest, abs(centre(nearest).y - y) <= spacing / 2 { Wallpapers.show(nearest) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        for i in Wallpapers.all.indices {
+            let c = centre(i)
+            if i == chosen {
+                let r = Self.diamond / 2
+                let path = NSBezierPath()
+                path.move(to: NSPoint(x: c.x, y: c.y + r))
+                path.line(to: NSPoint(x: c.x + r, y: c.y))
+                path.line(to: NSPoint(x: c.x, y: c.y - r))
+                path.line(to: NSPoint(x: c.x - r, y: c.y))
+                path.close()
+                strong.setFill()
+                path.fill()
+            } else {
+                let r = Self.dot / 2
+                faint.setFill()
+                NSBezierPath(ovalIn: NSRect(x: c.x - r, y: c.y - r, width: Self.dot, height: Self.dot)).fill()
+            }
+        }
+    }
+}
+
+/// A thin rounded bar: `filled` of it in the strong white, from the left (or the bottom), the rest faint.
+func drawBar(in rect: NSRect, filled: Double, vertical: Bool) {
+    let radius = barWidth / 2
+    faint.setFill()
+    NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+    let part = CGFloat(max(0, min(filled, 1)))
+    var done = rect
+    if vertical { done.size.height *= part } else { done.size.width *= part }
+    guard done.width > 0, done.height > 0 else { return }
+    strong.setFill()
+    NSBezierPath(roundedRect: done, xRadius: radius, yRadius: radius).fill()
+}
+
+/// How much of today has gone, midnight to midnight, with a mark at noon.
+final class DayView: DeskView {
+    override func draw(_ dirtyRect: NSRect) {
+        let calendar = Calendar.current
+        let now = Date()
+        let start = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        let gone = now.timeIntervalSince(start) / end.timeIntervalSince(start)
+        drawBar(in: NSRect(x: 0, y: bounds.midY - barWidth / 2, width: bounds.width, height: barWidth), filled: gone, vertical: false)
+        strong.setFill()
+        NSRect(x: bounds.midX - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
+    }
+
+    override func menuItems() -> [NSMenuItem] {
+        let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
+        return [NSMenuItem(title: time, action: nil, keyEquivalent: "")]
+    }
+}
+
+/// The battery, filling from the bottom.
+final class BatteryView: DeskView {
+    var level = batteryLevel()
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let level else { return }
+        drawBar(in: NSRect(x: bounds.midX - barWidth / 2, y: 0, width: barWidth, height: bounds.height), filled: level, vertical: true)
+    }
+
+    override func menuItems() -> [NSMenuItem] {
+        guard let level else { return [] }
+        return [NSMenuItem(title: "Battery \(Int((level * 100).rounded()))%", action: nil, keyEquivalent: "")]
+    }
+}
+
+final class DeskWindow: NSWindow {
+    /// where this piece goes on a screen
+    let frameOn: (Layout) -> NSRect
+
+    init(view: NSView, frameOn: @escaping (Layout) -> NSRect) {
+        self.frameOn = frameOn
         super.init(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
         // a clear window lets clicks fall through wherever nothing is drawn, i.e. between
-        // the thin strokes of the letters; saying so explicitly makes the whole word clickable
+        // the thin strokes of the letters; saying so explicitly makes the whole piece clickable
         ignoresMouseEvents = false
         // just above the desktop icons, below every other window
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
-        contentView = WordView(corner: corner)
+        contentView = view
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    /// Insets as in the apps: 5% of the width from the side, 6.25% of the height from the top or bottom.
     func place(on screen: NSScreen) {
-        let area = screen.visibleFrame
-        let height = CGFloat(corner.word.count) * letterStep
-        let centre = corner.left ? area.minX + area.width * 0.05 : area.maxX - area.width * 0.05
-        let y = corner.top ? area.maxY - area.height * 0.0625 - height : area.minY + area.height * 0.0625
-        setFrame(NSRect(x: (centre - columnWidth / 2).rounded(), y: y.rounded(), width: columnWidth, height: height), display: true)
+        setFrame(frameOn(Layout(area: screen.visibleFrame)).integral, display: true)
         orderFront(nil)
     }
 }
 
 final class Desk: NSObject, NSApplicationDelegate {
-    private let windows = corners.map(WordWindow.init)
+    private let wallpapers = WallpaperView()
+    private let day = DayView()
+    private let battery = BatteryView()
+    private var windows: [DeskWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        windows = corners.map { corner in
+            DeskWindow(view: WordView(corner: corner)) { l in
+                let height = CGFloat(corner.word.count) * letterStep
+                let x = (corner.left ? l.leftX : l.rightX) - columnWidth / 2
+                let y = corner.top ? l.topWord - height : l.bottomWord
+                return NSRect(x: x, y: y, width: columnWidth, height: height)
+            }
+        }
+        windows.append(DeskWindow(view: wallpapers) { [wallpapers] l in
+            let count = CGFloat(max(Wallpapers.all.count - 1, 1))
+            wallpapers.spacing = min(52, l.sideLength / count)
+            let height = wallpapers.spacing * count + wallpapers.spacing
+            return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
+        })
+        // level with the first letters of FILE and SURF
+        windows.append(DeskWindow(view: day) { l in
+            let width = l.area.width * 0.24
+            return NSRect(x: l.area.midX - width / 2, y: l.topWord - letterStep / 2 - 9, width: width, height: 18)
+        })
+        windows.append(DeskWindow(view: battery) { l in
+            NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
+        })
+
         layout()
         NotificationCenter.default.addObserver(
             self, selector: #selector(layout), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(tick), name: NSWorkspace.didWakeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            wallpapers, selector: #selector(WallpaperView.refresh), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        // a minute of the day is a few pixels at most; the battery moves slower still
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
+        HotKeys.register()
+    }
+
+    @objc private func tick() {
+        day.needsDisplay = true
+        battery.level = batteryLevel()
+        battery.needsDisplay = true
     }
 
     @objc private func layout() {
