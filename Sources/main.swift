@@ -267,8 +267,8 @@ final class WallpaperView: DeskView {
 
 let diamondSize: CGFloat = 13
 
-/// The mark for "this one" / "now", in the strong white.
-func drawDiamond(at c: NSPoint) {
+/// The mark for "this one" (the strong white) or "now" (solid white).
+func drawDiamond(at c: NSPoint, color: NSColor = strong) {
     let r = diamondSize / 2
     let path = NSBezierPath()
     path.move(to: NSPoint(x: c.x, y: c.y + r))
@@ -276,7 +276,7 @@ func drawDiamond(at c: NSPoint) {
     path.line(to: NSPoint(x: c.x, y: c.y - r))
     path.line(to: NSPoint(x: c.x - r, y: c.y))
     path.close()
-    strong.setFill()
+    color.setFill()
     path.fill()
 }
 
@@ -306,7 +306,7 @@ final class DayView: DeskView {
         NSRect(x: bounds.midX - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
         // kept inside the window so it is never cut at midnight's ends
         let r = diamondSize / 2
-        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY))
+        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY), color: .white)
     }
 
     override func menuItems() -> [NSMenuItem] {
