@@ -369,10 +369,11 @@ final class Desk: NSObject, NSApplicationDelegate {
             let height = wallpapers.spacing * count + wallpapers.spacing
             return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
         })
-        // level with the first letters of FILE and SURF
+        // halfway between the top of the screen and the tops of FILE and SURF, clear of windows below
         windows.append(DeskWindow(view: day) { l in
             let width = l.area.width * 0.24
-            return NSRect(x: l.area.midX - width / 2, y: l.topWord - letterStep / 2 - 9, width: width, height: 18)
+            let centre = (l.area.maxY + l.topWord) / 2
+            return NSRect(x: l.area.midX - width / 2, y: centre - 9, width: width, height: 18)
         })
         windows.append(DeskWindow(view: battery) { l in
             NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
