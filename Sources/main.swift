@@ -58,7 +58,7 @@ final class WordView: NSView {
 
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
-    override func mouseUp(with event: NSEvent) { open(corner) }
+    override func mouseDown(with event: NSEvent) { open(corner) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -107,6 +107,9 @@ final class WordWindow: NSWindow {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
+        // a clear window lets clicks fall through wherever nothing is drawn, i.e. between
+        // the thin strokes of the letters; saying so explicitly makes the whole word clickable
+        ignoresMouseEvents = false
         // just above the desktop icons, below every other window
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
