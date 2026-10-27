@@ -204,7 +204,7 @@ final class WordView: DeskView {
     override func draw(_ dirtyRect: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: letterFont,
-            .foregroundColor: NSColor.white.withAlphaComponent(hovered ? 0.95 : 0.6),
+            .foregroundColor: NSColor.white.withAlphaComponent(hovered ? 0.95 : 0.5),
         ]
         for (i, letter) in corner.word.enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
