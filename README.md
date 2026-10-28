@@ -9,7 +9,15 @@ Around them:
 - **Right edge**: the battery, filling from the bottom.
 - **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept). With an ad-hoc signed build it may ask again after a rebuild.
 
-**Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest takes the left half and the others stack on the right. **⌃⌥↩** makes the focused window the big one. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on; an ad-hoc signed build loses it after a rebuild (remove ReDesk from the list in System Settings › Privacy & Security › Accessibility and turn tiling on again).
+**Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest is the main one and the arrangement places the rest:
+  - **Main and Stack**: the main one on the left half, the others one above another on the right
+  - **Main on Top**: the main one across the top 60%, the others side by side under it
+  - **Main in the Middle**: the main one in the middle half, the others shared out to the left and the right
+  - **Columns** / **Rows**: all equal, side by side / one above another
+  - **Grid**: as square as it gets, a short last row spread across
+  - **One at a Time**: each window fills the whole area
+
+  Pick one in the right-click menu (that also turns tiling on) or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on; an ad-hoc signed build loses it after a rebuild (remove ReDesk from the list in System Settings › Privacy & Security › Accessibility and turn tiling on again).
 
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 

@@ -233,7 +233,7 @@ extension Notification.Name {
 }
 
 /// ⌃⌥↑ / ⌃⌥↓ step through the wallpapers from anywhere (Carbon hot keys need no permissions);
-/// ⌃⌥T turns tiling on and off, ⌃⌥↩ makes the focused window the big one.
+/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement, ⌃⌥↩ makes the focused window the big one.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
 
@@ -247,12 +247,13 @@ enum HotKeys {
             case 1: Wallpapers.step(-1)
             case 2: Wallpapers.step(1)
             case 3: Tiler.shared.on.toggle()
-            default: Tiler.shared.promote()
+            case 4: Tiler.shared.promote()
+            default: Tiler.shared.nextArrangement()
             }
             return noErr
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
-        for (number, key) in [(UInt32(1), kVK_UpArrow), (UInt32(2), kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return)] {
+        for (number, key) in [(UInt32(1), kVK_UpArrow), (UInt32(2), kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space)] {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), modifiers, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
                                 GetApplicationEventTarget(), 0, &ref)
@@ -262,7 +263,7 @@ enum HotKeys {
 }
 
 // ── tiling: the Re apps' windows share the middle of the desk ──
-// The newest window is the big one on the left, the others are stacked on the right.
+// The windows keep an order, newest first; the arrangement decides where each one goes.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
 let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook"])
@@ -280,16 +281,79 @@ private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
 }
 
-/// Frames for `count` windows in `area`: one fills it; more split it in half,
-/// the first on the left, the rest one above another on the right.
-func tileFrames(count: Int, in area: NSRect) -> [NSRect] {
-    guard count > 1 else { return count == 1 ? [area] : [] }
-    let half = (area.width - tileGap) / 2
-    let rest = CGFloat(count - 1)
-    let height = (area.height - tileGap * (rest - 1)) / rest
-    return [NSRect(x: area.minX, y: area.minY, width: half, height: area.height)] + (0 ..< count - 1).map { i in
-        let i = CGFloat(i)
-        return NSRect(x: area.maxX - half, y: area.maxY - (i + 1) * height - i * tileGap, width: half, height: height)
+/// `count` equal slices of `r` side by side, `tileGap` apart.
+func sideBySide(_ r: NSRect, _ count: Int) -> [NSRect] {
+    let width = (r.width - tileGap * CGFloat(count - 1)) / CGFloat(count)
+    return (0 ..< count).map { i in
+        NSRect(x: r.minX + CGFloat(i) * (width + tileGap), y: r.minY, width: width, height: r.height)
+    }
+}
+
+/// `count` equal slices of `r` one above another, the top one first.
+func stacked(_ r: NSRect, _ count: Int) -> [NSRect] {
+    let height = (r.height - tileGap * CGFloat(count - 1)) / CGFloat(count)
+    return (0 ..< count).map { i in
+        NSRect(x: r.minX, y: r.maxY - CGFloat(i + 1) * height - CGFloat(i) * tileGap, width: r.width, height: height)
+    }
+}
+
+/// Where the windows go; the first window is the main one.
+enum Arrangement: String, CaseIterable {
+    case main, mainTop, centre, columns, rows, grid, single
+
+    var title: String {
+        switch self {
+        case .main: "Main and Stack"
+        case .mainTop: "Main on Top"
+        case .centre: "Main in the Middle"
+        case .columns: "Columns"
+        case .rows: "Rows"
+        case .grid: "Grid"
+        case .single: "One at a Time"
+        }
+    }
+
+    func frames(count: Int, in area: NSRect) -> [NSRect] {
+        guard count > 1 else { return count == 1 ? [area] : [] }
+        let rest = count - 1
+        switch self {
+        case .main:
+            // the main one on the left half, the others one above another on the right
+            let halves = sideBySide(area, 2)
+            return [halves[0]] + stacked(halves[1], rest)
+        case .mainTop:
+            // the main one across the top 60%, the others side by side under it
+            let mainHeight = (area.height - tileGap) * 0.6
+            let top = NSRect(x: area.minX, y: area.maxY - mainHeight, width: area.width, height: mainHeight)
+            let bottom = NSRect(x: area.minX, y: area.minY, width: area.width, height: area.height - mainHeight - tileGap)
+            return [top] + sideBySide(bottom, rest)
+        case .centre:
+            // the main one in the middle half, the others shared out to the left and the right
+            guard count > 2 else { return sideBySide(area, 2) }
+            let side = (area.width - tileGap * 2) * 0.25
+            let left = NSRect(x: area.minX, y: area.minY, width: side, height: area.height)
+            let middle = NSRect(x: left.maxX + tileGap, y: area.minY, width: area.width - 2 * (side + tileGap), height: area.height)
+            let right = NSRect(x: middle.maxX + tileGap, y: area.minY, width: side, height: area.height)
+            let rightCount = rest / 2, leftCount = rest - rightCount
+            let l = stacked(left, leftCount), r = stacked(right, rightCount)
+            // alternating left and right, so a new window lands on the side with fewer
+            let sides: [NSRect] = (0 ..< rest).map { i in i % 2 == 0 ? l[i / 2] : r[i / 2] }
+            return [middle] + sides
+        case .columns:
+            return sideBySide(area, count)
+        case .rows:
+            return stacked(area, count)
+        case .grid:
+            // as square as it gets; a short last row is spread across the width
+            let across = Int(Double(count).squareRoot().rounded(.up))
+            let down = (count + across - 1) / across
+            return stacked(area, down).enumerated().flatMap { row, strip in
+                sideBySide(strip, min(across, count - row * across))
+            }
+        case .single:
+            // every window fills the area; the focused one is on top
+            return Array(repeating: area, count: count)
+        }
     }
 }
 
@@ -304,8 +368,22 @@ final class Tiler {
         }
     }
 
+    var arrangement = Arrangement(rawValue: UserDefaults.standard.string(forKey: "arrangement") ?? "") ?? .main {
+        didSet {
+            UserDefaults.standard.set(arrangement.rawValue, forKey: "arrangement")
+            retile()
+        }
+    }
+
     private var order: [TiledWindow] = []
     private var timer: Timer?
+
+    /// ⌃⌥Space: turns tiling on, or moves to the next arrangement when it is on.
+    func nextArrangement() {
+        guard on else { return on = true }
+        let all = Arrangement.allCases
+        arrangement = all[(all.firstIndex(of: arrangement)! + 1) % all.count]
+    }
 
     func start() {
         stop()
@@ -356,7 +434,7 @@ final class Tiler {
         let area = Layout(area: screen.visibleFrame).tiles
         // Accessibility counts from the top left of the main screen, AppKit from the bottom left
         let top = screen.frame.maxY
-        for (window, frame) in zip(order, tileFrames(count: order.count, in: area)) {
+        for (window, frame) in zip(order, arrangement.frames(count: order.count, in: area)) {
             var origin = CGPoint(x: frame.minX, y: top - frame.maxY)
             var size = frame.integral.size
             guard let position = AXValueCreate(.cgPoint, &origin), let extent = AXValueCreate(.cgSize, &size) else { continue }
@@ -367,7 +445,7 @@ final class Tiler {
         }
     }
 
-    /// The focused window becomes the big one on the left.
+    /// The focused window becomes the main one.
     func promote() {
         guard on, let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
               let focused = attribute(app as! AXUIElement, kAXFocusedWindowAttribute) else { return }
@@ -411,6 +489,14 @@ class DeskView: NSView {
         let tiling = menu.addItem(withTitle: "Tile Windows", action: #selector(toggleTiling), keyEquivalent: "")
         tiling.target = self
         tiling.state = Tiler.shared.on ? .on : .off
+        for arrangement in Arrangement.allCases {
+            let item = menu.addItem(withTitle: arrangement.title, action: #selector(arrange(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = arrangement.rawValue
+            item.indentationLevel = 1
+            item.state = Tiler.shared.on && Tiler.shared.arrangement == arrangement ? .on : .off
+        }
+        menu.addItem(.separator())
         let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -419,6 +505,13 @@ class DeskView: NSView {
     }
 
     @objc private func toggleTiling() { Tiler.shared.on.toggle() }
+
+    /// Picking an arrangement also turns tiling on.
+    @objc private func arrange(_ item: NSMenuItem) {
+        guard let arrangement = Arrangement(rawValue: item.representedObject as? String ?? "") else { return }
+        Tiler.shared.arrangement = arrangement
+        Tiler.shared.on = true
+    }
 
     /// Starting with the Mac is up to the user; macOS may ask to approve it in Login Items.
     @objc private func toggleLogin() {
