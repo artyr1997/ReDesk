@@ -9,7 +9,9 @@ swiftc -O -o "$APP/Contents/MacOS/ReDesk" Sources/main.swift
 cp Info.plist "$APP/Contents/"
 cp Resources/* "$APP/Contents/Resources/"
 cp -R wallpapers "$APP/Contents/Resources/"
-codesign --force -s - "$APP"
+# ad-hoc, but known by its identifier rather than by this build's hash, so macOS keeps
+# the Accessibility and audio permissions from one build to the next
+codesign --force -s - -r='designated => identifier "com.artursavytskyi.redesk"' "$APP"
 if [ "$1" = "--install" ]; then
 	DEST=/Applications/ReSpace
 	[ -d "$DEST" ] || DEST=/Applications
