@@ -3,7 +3,7 @@
 The Re apps as words in the corners of the desktop: FILE (ReFile) and SURF (ReSurf) at the top, HEAR (ReSound) and NOTE (ReNote) at the bottom. A click opens the app; a right click can set ReDesk to open at login, or quit it.
 
 Around them:
-- **Left edge**: the wallpapers in `wallpapers/` (pictures, and videos: mp4 / mov), as dots; the one on the desktop is a diamond. A click sets one, **⌃⌥↑ / ⌃⌥↓** step through them from anywhere.
+- **Left edge**: the wallpapers in `wallpapers/` (pictures, and videos: mp4 / mov), as dots; the one on the desktop is a diamond. A click sets one, **⌘⇧↑ / ⌘⇧↓** step through them (in the Re apps, see Keys).
 - Videos play muted and looping under the desktop icons on every screen, and pause while the displays sleep. A still of the first frame (kept in `~/Library/Application Support/ReDesk`) is set as the macOS wallpaper underneath, so the choice survives a restart.
 - **Top**: how much of the day has gone, midnight to midnight, with a mark at noon.
 - **Right edge**: the battery, filling from the bottom.
@@ -17,7 +17,21 @@ Around them:
   - **Grid**: as square as it gets, a short last row spread across
   - **One at a Time**: each window fills the whole area
 
-  Pick one in the right-click menu (that also turns tiling on) or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
+  Pick one in the right-click menu or with **⌘1…⌘7** (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
+
+**Keys**
+
+| Keys | Where | What |
+|---|---|---|
+| ⌃⌥← ⌃⌥→ ⌃⌥↑ ⌃⌥↓ | anywhere | focus the nearest window that way (in One at a Time: back and forth through them) |
+| ⌃⌥T | anywhere | tiling on / off |
+| ⌃⌥Space | anywhere | next arrangement |
+| ⌃⌥↩ | anywhere | the focused window becomes the main one |
+| ⌘1…⌘7 | in the Re apps | an arrangement, tiling on |
+| ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the middle / shrinks to its smallest (360×240) in the centre; tiling stops |
+| ⌘⇧↑ / ⌘⇧↓ | in the Re apps | previous / next wallpaper |
+
+The ⌘ keys are taken only while a Re app is in front, so they keep their usual meaning everywhere else (and lose it inside the Re apps: ⌘↑ / ⌘↓ no longer jump to the top / bottom of a text there). They are read with an event tap, which needs the same Accessibility permission as tiling.
 
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 

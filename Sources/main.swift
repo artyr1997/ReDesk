@@ -2,6 +2,8 @@
 // Corners: the apps as words (a click opens one). Left edge: the wallpapers, pictures and videos, as dots.
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
+// Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
+// ⌘↑/↓ make a window as big / small as it gets (tiling stops), ⌘1…⌘7 pick an arrangement.
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
@@ -232,10 +234,13 @@ extension Notification.Name {
     static let wallpaperChanged = Notification.Name("ReDeskWallpaperChanged")
 }
 
-/// ⌃⌥↑ / ⌃⌥↓ step through the wallpapers from anywhere (Carbon hot keys need no permissions);
-/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement, ⌃⌥↩ makes the focused window the big one.
+/// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
+/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement, ⌃⌥↩ makes the focused window the main one.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
+    private static let keys: [(id: UInt32, key: Int)] = [
+        (1, kVK_UpArrow), (2, kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space), (6, kVK_LeftArrow), (7, kVK_RightArrow),
+    ]
 
     static func register() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -244,21 +249,71 @@ enum HotKeys {
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
             switch id.id {
-            case 1: Wallpapers.step(-1)
-            case 2: Wallpapers.step(1)
+            case 1: Tiler.shared.focus(.up)
+            case 2: Tiler.shared.focus(.down)
             case 3: Tiler.shared.on.toggle()
             case 4: Tiler.shared.promote()
-            default: Tiler.shared.nextArrangement()
+            case 5: Tiler.shared.nextArrangement()
+            case 6: Tiler.shared.focus(.left)
+            default: Tiler.shared.focus(.right)
             }
             return noErr
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
-        for (number, key) in [(UInt32(1), kVK_UpArrow), (UInt32(2), kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space)] {
+        for (number, key) in keys {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), modifiers, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
                                 GetApplicationEventTarget(), 0, &ref)
             refs.append(ref)
         }
+    }
+}
+
+/// ⌘ keys, only while one of the Re apps is in front (elsewhere they keep their usual meaning):
+/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ / ⌘↓ biggest / smallest window, ⌘1…⌘7 arrangements.
+/// Taking a key away from an app needs an event tap, which needs the Accessibility permission.
+enum CommandKeys {
+    private static var tap: CFMachPort?
+    private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
+
+    /// Tries now and again later: the tap can only be made once the permission is given.
+    static func install() {
+        guard tap == nil else { return }
+        guard AXIsProcessTrusted() else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { install() }
+            return
+        }
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                                           eventsOfInterest: mask, callback: { _, type, event, _ in
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let tap = CommandKeys.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                return Unmanaged.passUnretained(event)
+            }
+            guard let action = CommandKeys.action(for: event) else { return Unmanaged.passUnretained(event) }
+            DispatchQueue.main.async(execute: action)
+            return nil
+        }, userInfo: nil) else { return }
+        tap = port
+        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, port, 0), .commonModes)
+        CGEvent.tapEnable(tap: port, enable: true)
+    }
+
+    private static func action(for event: CGEvent) -> (() -> Void)? {
+        let flags = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
+        guard flags.contains(.maskCommand),
+              tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") else { return nil }
+        let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        let arrow = key == kVK_UpArrow ? 1 : key == kVK_DownArrow ? -1 : 0
+        if flags == [.maskCommand, .maskShift], arrow != 0 {
+            return { Wallpapers.step(-arrow) }
+        }
+        guard flags == .maskCommand else { return nil }
+        if arrow != 0 { return { Tiler.shared.resizeFocused(biggest: arrow > 0) } }
+        if let i = digits.firstIndex(of: key), i < Arrangement.allCases.count {
+            return { Tiler.shared.choose(Arrangement.allCases[i]) }
+        }
+        return nil
     }
 }
 
@@ -484,8 +539,6 @@ final class Tiler {
     func stop() {
         timer?.invalidate()
         timer = nil
-        animation?.invalidate()
-        animation = nil
         overlay.hide()
     }
 
@@ -620,6 +673,76 @@ final class Tiler {
         animation = timer
     }
 
+    enum Direction { case left, right, up, down }
+
+    /// The window that has the keyboard, if it is one of the Re apps'.
+    private func focusedWindow() -> TiledWindow? {
+        guard let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
+              let focused = attribute(app as! AXUIElement, kAXFocusedWindowAttribute) else { return nil }
+        let window = TiledWindow(element: focused as! AXUIElement)
+        return openWindows().contains(window) ? window : nil
+    }
+
+    /// ⌃⌥ arrows: the focus goes to the nearest window that way. In One at a Time (all in one place)
+    /// ← / ↑ and → / ↓ go back and forth through them.
+    func focus(_ direction: Direction) {
+        guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
+        let windows = on && !order.isEmpty ? order : openWindows()
+        guard let current = focusedWindow() ?? windows.first, windows.count > 1 else { return }
+        let target: TiledWindow?
+        if on && arrangement == .single, let at = windows.firstIndex(of: current) {
+            let step = direction == .right || direction == .down ? 1 : -1
+            target = windows[(at + step + windows.count) % windows.count]
+        } else if let from = frame(of: current.element) {
+            // the closest window whose middle lies that way; straight ahead counts more than off to the side
+            let candidates = windows.filter { $0 != current }.compactMap { w in frame(of: w.element).map { (w, $0) } }
+            target = candidates.compactMap { w, f -> (TiledWindow, CGFloat)? in
+                let dx = f.midX - from.midX, dy = f.midY - from.midY
+                let (ahead, aside): (CGFloat, CGFloat) = switch direction {
+                case .left: (-dx, dy)
+                case .right: (dx, dy)
+                case .up: (dy, dx)
+                case .down: (-dy, dx)
+                }
+                return ahead > 1 ? (w, ahead + abs(aside) * 2) : nil
+            }.min { $0.1 < $1.1 }?.0
+        } else {
+            target = nil
+        }
+        guard let target else { return }
+        raise(target)
+    }
+
+    private func raise(_ window: TiledWindow) {
+        var pid: pid_t = 0
+        AXUIElementGetPid(window.element, &pid)
+        AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        NSRunningApplication(processIdentifier: pid)?.activate()
+    }
+
+    /// The smallest size the Re apps allow (their windows' minWidth / minHeight).
+    private static let smallest = NSSize(width: 360, height: 240)
+
+    /// ⌘↑ / ⌘↓: the focused window fills the desk's middle, or shrinks to the smallest size in its centre.
+    /// Tiling stops, or it would put the window straight back.
+    func resizeFocused(biggest: Bool) {
+        guard let window = focusedWindow(), let screen = NSScreen.screens.first else { return }
+        if on { on = false }
+        let area = Layout(area: screen.visibleFrame).tiles
+        let size = Tiler.smallest
+        let to = biggest ? area : NSRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2,
+                                         width: size.width, height: size.height).integral
+        guard let from = frame(of: window.element) else { return }
+        animate([Move(window: window, from: from, to: to)])
+    }
+
+    /// ⌘1…⌘7: this arrangement, with tiling on.
+    func choose(_ arrangement: Arrangement) {
+        self.arrangement = arrangement
+        on = true
+    }
+
     /// The focused window becomes the main one.
     func promote() {
         guard on, let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
@@ -670,7 +793,9 @@ class DeskView: NSView {
             allow.indentationLevel = 1
         }
         for arrangement in Arrangement.allCases {
-            let item = menu.addItem(withTitle: arrangement.title, action: #selector(arrange(_:)), keyEquivalent: "")
+            let number = Arrangement.allCases.firstIndex(of: arrangement)! + 1
+            let item = menu.addItem(withTitle: arrangement.title, action: #selector(arrange(_:)), keyEquivalent: "\(number)")
+            item.keyEquivalentModifierMask = .command
             item.target = self
             item.representedObject = arrangement.rawValue
             item.indentationLevel = 1
@@ -691,8 +816,7 @@ class DeskView: NSView {
     /// Picking an arrangement also turns tiling on.
     @objc private func arrange(_ item: NSMenuItem) {
         guard let arrangement = Arrangement(rawValue: item.representedObject as? String ?? "") else { return }
-        Tiler.shared.arrangement = arrangement
-        Tiler.shared.on = true
+        Tiler.shared.choose(arrangement)
     }
 
     /// Starting with the Mac is up to the user; macOS may ask to approve it in Login Items.
@@ -1137,6 +1261,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
         if Tiler.shared.on { Tiler.shared.start() }
+        CommandKeys.install()
     }
 
     @objc private func tick() {
