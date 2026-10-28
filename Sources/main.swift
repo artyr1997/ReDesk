@@ -389,9 +389,15 @@ final class Tiler {
         stop()
         // without the permission, macOS shows its prompt; tiling begins once it is given
         let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+        // the prompt only comes once; after that (or after a rebuild drops the permission) go straight to the list
+        if !trusted { Tiler.openAccessibilitySettings() }
         order = []
         timer = Timer.scheduledTimer(withTimeInterval: trusted ? 0.5 : 2, repeats: true) { [weak self] _ in self?.look() }
         look()
+    }
+
+    static func openAccessibilitySettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
     func stop() {
@@ -489,6 +495,11 @@ class DeskView: NSView {
         let tiling = menu.addItem(withTitle: "Tile Windows", action: #selector(toggleTiling), keyEquivalent: "")
         tiling.target = self
         tiling.state = Tiler.shared.on ? .on : .off
+        if Tiler.shared.on && !AXIsProcessTrusted() {
+            let allow = menu.addItem(withTitle: "Allow in Accessibility…", action: #selector(allowAccessibility), keyEquivalent: "")
+            allow.target = self
+            allow.indentationLevel = 1
+        }
         for arrangement in Arrangement.allCases {
             let item = menu.addItem(withTitle: arrangement.title, action: #selector(arrange(_:)), keyEquivalent: "")
             item.target = self
@@ -505,6 +516,8 @@ class DeskView: NSView {
     }
 
     @objc private func toggleTiling() { Tiler.shared.on.toggle() }
+
+    @objc private func allowAccessibility() { Tiler.openAccessibilitySettings() }
 
     /// Picking an arrangement also turns tiling on.
     @objc private func arrange(_ item: NSMenuItem) {
