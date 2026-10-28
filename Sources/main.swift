@@ -1,9 +1,11 @@
 // ReDesk: the Re apps and a few quiet gauges on the desktop.
 // Corners: the apps as words (a click opens one). Left edge: the wallpapers, pictures and videos, as dots.
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
+// Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
+import ApplicationServices
 import AVFoundation
 import Carbon.HIToolbox
 import CoreAudio
@@ -62,6 +64,14 @@ struct Layout {
     var bottomWord: CGFloat { area.minY + area.height * 0.0625 }
     /// the dots on the left and the battery on the right share this length, around the middle
     var sideLength: CGFloat { area.height * 0.22 }
+    /// the day line: a little under halfway between the top of the screen and the tops of FILE and SURF
+    var dayLine: CGFloat { topWord + (area.maxY - topWord) * 0.35 - 8 }
+    /// the wave: the day line's twin at the bottom
+    var waveLine: CGFloat { bottomWord - (bottomWord - area.minY) * 0.35 + 8 }
+    /// where tiled windows go: between the side columns, 40pt under the day line and over the wave
+    var tiles: NSRect {
+        NSRect(x: leftX + 56, y: waveLine + 40, width: rightX - leftX - 112, height: dayLine - waveLine - 80)
+    }
 }
 
 // ── wallpapers ──
@@ -222,7 +232,8 @@ extension Notification.Name {
     static let wallpaperChanged = Notification.Name("ReDeskWallpaperChanged")
 }
 
-/// ⌃⌥↑ / ⌃⌥↓ step through the wallpapers from anywhere (Carbon hot keys need no permissions).
+/// ⌃⌥↑ / ⌃⌥↓ step through the wallpapers from anywhere (Carbon hot keys need no permissions);
+/// ⌃⌥T turns tiling on and off, ⌃⌥↩ makes the focused window the big one.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
 
@@ -232,16 +243,139 @@ enum HotKeys {
             var id = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
-            Wallpapers.step(id.id == 1 ? -1 : 1)
+            switch id.id {
+            case 1: Wallpapers.step(-1)
+            case 2: Wallpapers.step(1)
+            case 3: Tiler.shared.on.toggle()
+            default: Tiler.shared.promote()
+            }
             return noErr
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
-        for (number, key) in [(UInt32(1), kVK_UpArrow), (UInt32(2), kVK_DownArrow)] {
+        for (number, key) in [(UInt32(1), kVK_UpArrow), (UInt32(2), kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return)] {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), modifiers, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
                                 GetApplicationEventTarget(), 0, &ref)
             refs.append(ref)
         }
+    }
+}
+
+// ── tiling: the Re apps' windows share the middle of the desk ──
+// The newest window is the big one on the left, the others are stacked on the right.
+// Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
+
+let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook"])
+let tileGap: CGFloat = 10
+
+/// An Accessibility window, comparable so the order can be kept between looks.
+struct TiledWindow: Hashable {
+    let element: AXUIElement
+    static func == (a: Self, b: Self) -> Bool { CFEqual(a.element, b.element) }
+    func hash(into hasher: inout Hasher) { hasher.combine(CFHash(element)) }
+}
+
+private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+}
+
+/// Frames for `count` windows in `area`: one fills it; more split it in half,
+/// the first on the left, the rest one above another on the right.
+func tileFrames(count: Int, in area: NSRect) -> [NSRect] {
+    guard count > 1 else { return count == 1 ? [area] : [] }
+    let half = (area.width - tileGap) / 2
+    let rest = CGFloat(count - 1)
+    let height = (area.height - tileGap * (rest - 1)) / rest
+    return [NSRect(x: area.minX, y: area.minY, width: half, height: area.height)] + (0 ..< count - 1).map { i in
+        let i = CGFloat(i)
+        return NSRect(x: area.maxX - half, y: area.maxY - (i + 1) * height - i * tileGap, width: half, height: height)
+    }
+}
+
+final class Tiler {
+    static let shared = Tiler()
+    private static let key = "tiling"
+
+    var on = UserDefaults.standard.bool(forKey: Tiler.key) {
+        didSet {
+            UserDefaults.standard.set(on, forKey: Tiler.key)
+            if on { start() } else { stop() }
+        }
+    }
+
+    private var order: [TiledWindow] = []
+    private var timer: Timer?
+
+    func start() {
+        stop()
+        // without the permission, macOS shows its prompt; tiling begins once it is given
+        let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+        order = []
+        timer = Timer.scheduledTimer(withTimeInterval: trusted ? 0.5 : 2, repeats: true) { [weak self] _ in self?.look() }
+        look()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    /// The windows now open, newest first; tiles again when that changed.
+    private func look() {
+        guard AXIsProcessTrusted() else { return }
+        if timer?.timeInterval != 0.5 {
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.look() }
+        }
+        let open = openWindows()
+        let kept = order.filter(open.contains)
+        let added = open.filter { !kept.contains($0) }
+        guard added.count > 0 || kept.count != order.count else { return }
+        order = added + kept
+        retile()
+    }
+
+    private func openWindows() -> [TiledWindow] {
+        NSWorkspace.shared.runningApplications
+            .filter { tiledApps.contains($0.bundleIdentifier ?? "") && !$0.isHidden }
+            .flatMap { app -> [TiledWindow] in
+                let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
+                return windows
+                    .filter { w in
+                        attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
+                            && attribute(w, kAXMinimizedAttribute) as? Bool != true
+                            && attribute(w, "AXFullScreen") as? Bool != true
+                    }
+                    .map(TiledWindow.init)
+            }
+    }
+
+    func retile() {
+        guard on, AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return }
+        let area = Layout(area: screen.visibleFrame).tiles
+        // Accessibility counts from the top left of the main screen, AppKit from the bottom left
+        let top = screen.frame.maxY
+        for (window, frame) in zip(order, tileFrames(count: order.count, in: area)) {
+            var origin = CGPoint(x: frame.minX, y: top - frame.maxY)
+            var size = frame.integral.size
+            guard let position = AXValueCreate(.cgPoint, &origin), let extent = AXValueCreate(.cgSize, &size) else { continue }
+            // position, size, and position again: a window may refuse a size that doesn't fit where it is
+            AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
+            AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, extent)
+            AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
+        }
+    }
+
+    /// The focused window becomes the big one on the left.
+    func promote() {
+        guard on, let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
+              let focused = attribute(app as! AXUIElement, kAXFocusedWindowAttribute) else { return }
+        let window = TiledWindow(element: focused as! AXUIElement)
+        guard let at = order.firstIndex(of: window), at > 0 else { return }
+        order.remove(at: at)
+        order.insert(window, at: 0)
+        retile()
     }
 }
 
@@ -274,12 +408,17 @@ class DeskView: NSView {
         let own = menuItems()
         own.forEach(menu.addItem)
         if !own.isEmpty { menu.addItem(.separator()) }
+        let tiling = menu.addItem(withTitle: "Tile Windows", action: #selector(toggleTiling), keyEquivalent: "")
+        tiling.target = self
+        tiling.state = Tiler.shared.on ? .on : .off
         let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(withTitle: "Quit ReDesk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
+
+    @objc private func toggleTiling() { Tiler.shared.on.toggle() }
 
     /// Starting with the Mac is up to the user; macOS may ask to approve it in Login Items.
     @objc private func toggleLogin() {
@@ -692,11 +831,9 @@ final class Desk: NSObject, NSApplicationDelegate {
             let height = wallpapers.spacing * count + wallpapers.spacing
             return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
         })
-        // a little under halfway between the top of the screen and the tops of FILE and SURF
         windows.append(DeskWindow(view: day) { l in
             let width = l.area.width * 0.24
-            let centre = l.topWord + (l.area.maxY - l.topWord) * 0.35 - 8
-            return NSRect(x: l.area.midX - width / 2, y: centre - 9, width: width, height: 18)
+            return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 9, width: width, height: 18)
         })
         windows.append(DeskWindow(view: battery) { l in
             NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
@@ -704,8 +841,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         // the day line's twin at the bottom, between HEAR and NOTE; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
             let width = l.area.width * 0.24
-            let centre = l.bottomWord - (l.bottomWord - l.area.minY) * 0.35 + 8
-            return NSRect(x: l.area.midX - width / 2, y: centre - 22, width: width, height: 44)
+            return NSRect(x: l.area.midX - width / 2, y: l.waveLine - 22, width: width, height: 44)
         }
         waveWindow.ignoresMouseEvents = true
         windows.append(waveWindow)
@@ -725,6 +861,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.pause() }
         workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
+        if Tiler.shared.on { Tiler.shared.start() }
     }
 
     @objc private func tick() {
@@ -737,6 +874,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         guard let screen = NSScreen.screens.first else { return }
         windows.forEach { $0.place(on: screen) }
         LiveWallpaper.shared.layout()
+        Tiler.shared.retile()
     }
 }
 
