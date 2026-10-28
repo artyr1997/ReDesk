@@ -236,12 +236,16 @@ extension Notification.Name {
 
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
 /// ⌃⌥T turns tiling on and off, ⌃⌥1…⌃⌥7 pick an arrangement, ⌃⌥Space goes to the next one,
-/// ⌃⌥↩ makes the focused window the main one.
+/// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
     private static let keys: [(id: UInt32, key: Int)] = [
         (1, kVK_UpArrow), (2, kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space), (6, kVK_LeftArrow), (7, kVK_RightArrow),
     ] + zip(UInt32(11)..., [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7]).map { ($0, $1) }
+    /// with ⇧ as well
+    private static let shifted: [(id: UInt32, key: Int)] = [
+        (21, kVK_UpArrow), (22, kVK_DownArrow), (23, kVK_LeftArrow), (24, kVK_RightArrow),
+    ]
 
     static func register() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -257,14 +261,19 @@ enum HotKeys {
             case 5: Tiler.shared.nextArrangement()
             case 6: Tiler.shared.focus(.left)
             case 7: Tiler.shared.focus(.right)
+            case 21: Tiler.shared.move(.up)
+            case 22: Tiler.shared.move(.down)
+            case 23: Tiler.shared.move(.left)
+            case 24: Tiler.shared.move(.right)
             default: Tiler.shared.choose(Arrangement.allCases[Int(id.id) - 11])
             }
             return noErr
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
-        for (number, key) in keys {
+        let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
+        for (number, key, mods) in all {
             var ref: EventHotKeyRef?
-            RegisterEventHotKey(UInt32(key), modifiers, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
+            RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
                                 GetApplicationEventTarget(), 0, &ref)
             refs.append(ref)
         }
@@ -686,14 +695,36 @@ final class Tiler {
     func focus(_ direction: Direction) {
         guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
         let windows = on && !order.isEmpty ? order : openWindows()
-        guard let current = focusedWindow() ?? windows.first, windows.count > 1 else { return }
+        guard let current = focusedWindow() ?? windows.first, windows.count > 1,
+              let target = neighbour(of: current, among: windows, toward: direction) else { return }
+        raise(target)
+    }
+
+    /// ⌃⌥⇧ arrows: the focused window trades places with the nearest one that way, and keeps the focus.
+    /// In One at a Time it moves back or forth in the turn.
+    func move(_ direction: Direction) {
+        guard on, AXIsProcessTrusted(), let current = focusedWindow(),
+              let at = order.firstIndex(of: current),
+              let target = neighbour(of: current, among: order, toward: direction),
+              let to = order.firstIndex(of: target) else { return }
+        order.swapAt(at, to)
+        retile()
+    }
+
+    /// Where a window belongs while tiling (it may still be gliding there), otherwise where it is.
+    private func place(of window: TiledWindow) -> NSRect? {
+        if on, slots.count == order.count, let at = order.firstIndex(of: window) { return slots[at] }
+        return frame(of: window.element)
+    }
+
+    private func neighbour(of current: TiledWindow, among windows: [TiledWindow], toward direction: Direction) -> TiledWindow? {
         let target: TiledWindow?
         if on && arrangement == .single, let at = windows.firstIndex(of: current) {
             let step = direction == .right || direction == .down ? 1 : -1
             target = windows[(at + step + windows.count) % windows.count]
-        } else if let from = frame(of: current.element) {
+        } else if let from = place(of: current) {
             // the closest window whose middle lies that way; straight ahead counts more than off to the side
-            let candidates = windows.filter { $0 != current }.compactMap { w in frame(of: w.element).map { (w, $0) } }
+            let candidates = windows.filter { $0 != current }.compactMap { w in place(of: w).map { (w, $0) } }
             target = candidates.compactMap { w, f -> (TiledWindow, CGFloat)? in
                 let dx = f.midX - from.midX, dy = f.midY - from.midY
                 let (ahead, aside): (CGFloat, CGFloat) = switch direction {
@@ -707,8 +738,7 @@ final class Tiler {
         } else {
             target = nil
         }
-        guard let target else { return }
-        raise(target)
+        return target
     }
 
     private func raise(_ window: TiledWindow) {
