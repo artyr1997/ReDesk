@@ -333,29 +333,127 @@ final class BatteryView: DeskView {
 
 // ── sound ──
 
-/// Whether anything is playing through the current output. Core Audio only says that the
-/// device is running, not how loud, so the wave below is drawn, not measured.
-func soundPlaying() -> Bool {
-    var device = AudioDeviceID(0)
-    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-    var address = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain)
-    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else { return false }
-    var running: UInt32 = 0
-    size = UInt32(MemoryLayout<UInt32>.size)
-    address.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
-    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &running) == noErr else { return false }
-    return running != 0
+private let system = AudioObjectID(kAudioObjectSystemObject)
+
+private func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+}
+
+/// For plain numbers and ids only; strings go through `uid`.
+private func read<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, as value: T) -> T? {
+    var address = address(selector)
+    var value = value
+    var size = UInt32(MemoryLayout<T>.size)
+    return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr ? value : nil
+}
+
+/// A device's UID; Core Audio hands the string over retained.
+private func uid(_ device: AudioObjectID) -> String? {
+    var address = address(kAudioDevicePropertyDeviceUID)
+    var value: Unmanaged<CFString>?
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else { return nil }
+    return value?.takeRetainedValue() as String?
+}
+
+/// Whether any other app is sending sound out right now (asked per app, so ReDesk's own
+/// listening below doesn't count).
+func othersPlaying() -> Bool {
+    var list = address(kAudioHardwarePropertyProcessObjectList)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(system, &list, 0, nil, &size) == noErr else { return false }
+    var processes = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(system, &list, 0, nil, &size, &processes) == noErr else { return false }
+    let me = getpid()
+    return processes.contains { process in
+        read(process, kAudioProcessPropertyPID, as: pid_t(0)) != me
+            && read(process, kAudioProcessPropertyIsRunningOutput, as: UInt32(0)) ?? 0 != 0
+    }
+}
+
+/// How loud the Mac is playing, 0…1. It listens to everything that goes out through a Core Audio
+/// tap (macOS asks once for permission to capture audio); nothing is kept, only the loudness.
+final class Meter {
+    private var tap = AudioObjectID(kAudioObjectUnknown)
+    private var device = AudioObjectID(kAudioObjectUnknown)
+    private var proc: AudioDeviceIOProcID?
+    private let lock = NSLock()
+    private var current: Float = 0
+    private(set) var running = false
+
+    var level: CGFloat {
+        lock.lock(); defer { lock.unlock() }
+        return CGFloat(current)
+    }
+
+    func start() {
+        guard !running else { return }
+        running = true
+        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        description.uuid = UUID()
+        description.isPrivate = true
+        description.muteBehavior = .unmuted
+        guard AudioHardwareCreateProcessTap(description, &tap) == noErr,
+              let output = read(system, kAudioHardwarePropertyDefaultOutputDevice, as: AudioObjectID(0)),
+              let outputUID = uid(output) else { return stop() }
+        let aggregate: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "ReDesk Meter",
+            kAudioAggregateDeviceUIDKey: UUID().uuidString,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
+            kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: description.uuid.uuidString]],
+        ]
+        guard AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &device) == noErr else { return stop() }
+        let status = AudioDeviceCreateIOProcIDWithBlock(&proc, device, DispatchQueue(label: "redesk.meter")) { [weak self] _, input, _, _, _ in
+            var sum: Float = 0
+            var count = 0
+            for buffer in UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input)) {
+                guard let data = buffer.mData else { continue }
+                let samples = data.assumingMemoryBound(to: Float.self)
+                let n = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                for i in 0..<n { sum += samples[i] * samples[i] }
+                count += n
+            }
+            let rms = count > 0 ? (sum / Float(count)).squareRoot() : 0
+            // -54 dB … -12 dB of loudness spread over 0…1
+            let db = 20 * log10(max(rms, 1e-6))
+            let level = min(max((db + 54) / 42, 0), 1)
+            self?.lock.lock()
+            self?.current = level
+            self?.lock.unlock()
+        }
+        guard status == noErr, let proc, AudioDeviceStart(device, proc) == noErr else { return stop() }
+    }
+
+    func stop() {
+        if device != kAudioObjectUnknown {
+            if let proc {
+                AudioDeviceStop(device, proc)
+                AudioDeviceDestroyIOProcID(device, proc)
+            }
+            AudioHardwareDestroyAggregateDevice(device)
+        }
+        if tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
+        tap = AudioObjectID(kAudioObjectUnknown)
+        device = AudioObjectID(kAudioObjectUnknown)
+        proc = nil
+        running = false
+        lock.lock(); current = 0; lock.unlock()
+    }
 }
 
 /// While sound plays: three soft sine lines drifting along the bottom, tapering to nothing at
-/// both ends. They swell in when sound starts and settle flat and away when it stops.
+/// both ends. Their height follows how loud it is; in silence they settle flat and away.
 final class WaveView: NSView {
+    private let meter = Meter()
     private var playing = false
-    /// 0 (gone) … 1 (full), eased towards `playing`
+    /// the drawn loudness, 0 (gone) … 1, eased towards the meter
     private var strength: CGFloat = 0
+    private var phase: CGFloat = 0
+    private var last = CACurrentMediaTime()
     private var frames: Timer?
     private let waves: [(cycles: CGFloat, speed: CGFloat, height: CGFloat, alpha: CGFloat)] = [
         (2.0, 1.6, 1.0, 0.35),
@@ -365,32 +463,43 @@ final class WaveView: NSView {
 
     func set(playing: Bool) {
         self.playing = playing
-        if playing || strength > 0 { start() }
+        if playing {
+            meter.start()
+            start()
+        }
     }
 
     private func start() {
         guard frames == nil else { return }
+        last = CACurrentMediaTime()
         frames = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.frame() }
     }
 
     private func frame() {
-        strength += ((playing ? 1 : 0) - strength) * 0.04
+        let now = CACurrentMediaTime()
+        let dt = CGFloat(now - last)
+        last = now
+        let target = playing ? meter.level : 0
+        // rise quickly with a beat, fall back gently
+        strength += (target - strength) * (target > strength ? 0.35 : 0.08)
+        // louder sound moves the lines a little faster
+        phase += dt * (0.6 + 0.9 * strength)
         if !playing && strength < 0.005 {
             strength = 0
             frames?.invalidate()
             frames = nil
+            meter.stop()
         }
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard strength > 0 else { return }
-        let t = CGFloat(CACurrentMediaTime())
+        guard strength > 0.01 else { return }
         let mid = bounds.midY
         let reach = bounds.height / 2 - 2
         for (k, wave) in waves.enumerated() {
             // each line breathes a little on its own
-            let breath = 0.75 + 0.25 * sin(t * 0.9 + CGFloat(k) * 2.1)
+            let breath = 0.75 + 0.25 * sin(phase * 0.9 + CGFloat(k) * 2.1)
             let amplitude = reach * wave.height * breath * strength
             let path = NSBezierPath()
             path.lineWidth = 1.5
@@ -399,11 +508,12 @@ final class WaveView: NSView {
             while x <= bounds.width {
                 let u = x / bounds.width
                 let taper = pow(sin(.pi * u), 2)
-                let y = mid + amplitude * taper * sin(2 * .pi * wave.cycles * u + t * wave.speed + CGFloat(k))
+                let y = mid + amplitude * taper * sin(2 * .pi * wave.cycles * u + phase * wave.speed * 2 + CGFloat(k))
                 if x == 0 { path.move(to: NSPoint(x: x, y: y)) } else { path.line(to: NSPoint(x: x, y: y)) }
                 x += 2
             }
-            NSColor.white.withAlphaComponent(wave.alpha * strength).setStroke()
+            // quiet sound draws fainter lines too
+            NSColor.white.withAlphaComponent(wave.alpha * min(1, strength * 1.6)).setStroke()
             path.stroke()
         }
     }
@@ -487,7 +597,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         // a minute of the day is a few pixels at most; the battery moves slower still
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
         HotKeys.register()
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: soundPlaying()) }
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
     }
 
     @objc private func tick() {
