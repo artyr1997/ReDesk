@@ -264,6 +264,7 @@ enum HotKeys {
 
 // ── tiling: the Re apps' windows share the middle of the desk ──
 // The windows keep an order, newest first; the arrangement decides where each one goes.
+// Changes glide; a window dragged onto another's place swaps with it, anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
 let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook"])
@@ -357,6 +358,72 @@ enum Arrangement: String, CaseIterable {
     }
 }
 
+/// Where a window is, in AppKit coordinates (Accessibility counts from the top left of the main screen).
+func frame(of window: AXUIElement) -> NSRect? {
+    guard let p = attribute(window, kAXPositionAttribute), let s = attribute(window, kAXSizeAttribute),
+          let top = NSScreen.screens.first?.frame.maxY else { return nil }
+    var point = CGPoint.zero, size = CGSize.zero
+    AXValueGetValue(p as! AXValue, .cgPoint, &point)
+    AXValueGetValue(s as! AXValue, .cgSize, &size)
+    return NSRect(x: point.x, y: top - point.y - size.height, width: size.width, height: size.height)
+}
+
+/// Moves a window; `exact` sets position, size and position again, as a window may refuse
+/// a size that doesn't fit where it is.
+func setFrame(of window: AXUIElement, to r: NSRect, size resize: Bool = true, exact: Bool = false) {
+    guard let top = NSScreen.screens.first?.frame.maxY else { return }
+    var origin = CGPoint(x: r.minX.rounded(), y: (top - r.maxY).rounded())
+    var size = CGSize(width: r.width.rounded(), height: r.height.rounded())
+    guard let position = AXValueCreate(.cgPoint, &origin), let extent = AXValueCreate(.cgSize, &size) else { return }
+    AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position)
+    if resize { AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, extent) }
+    if exact { AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position) }
+}
+
+/// The place a dragged window would go: a soft frame over it, above the windows.
+final class DropOverlay {
+    private final class Outline: NSView {
+        override func draw(_ dirtyRect: NSRect) {
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 14, yRadius: 14)
+            NSColor.white.withAlphaComponent(0.14).setFill()
+            path.fill()
+            strong.setStroke()
+            path.lineWidth = 2
+            path.stroke()
+        }
+    }
+
+    private let window = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+    private(set) var shown = false
+
+    init() {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        window.contentView = Outline()
+        window.alphaValue = 0
+    }
+
+    func show(_ r: NSRect) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            if shown { window.animator().setFrame(r, display: true) } else { window.setFrame(r, display: true) }
+            window.animator().alphaValue = 1
+        }
+        window.orderFront(nil)
+        shown = true
+    }
+
+    func hide() {
+        guard shown else { return }
+        shown = false
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.15; window.animator().alphaValue = 0 }
+    }
+}
+
 final class Tiler {
     static let shared = Tiler()
     private static let key = "tiling"
@@ -375,8 +442,20 @@ final class Tiler {
         }
     }
 
+    /// the windows, main first; `slots[i]` is where `order[i]` belongs
     private var order: [TiledWindow] = []
+    private var slots: [NSRect] = []
+    /// where each window really ended up (a window may keep a size of its own), to tell when it is moved
+    private var settled: [TiledWindow: NSRect] = [:]
+
     private var timer: Timer?
+    private var ticks = 0
+    private var pressed = false
+    private var dragged: Int?
+    private let overlay = DropOverlay()
+
+    private struct Move { let window: TiledWindow; let from: NSRect; let to: NSRect }
+    private var animation: Timer?
 
     /// ⌃⌥Space: turns tiling on, or moves to the next arrangement when it is on.
     func nextArrangement() {
@@ -392,8 +471,10 @@ final class Tiler {
         // the prompt only comes once; after that (or after a rebuild drops the permission) go straight to the list
         if !trusted { Tiler.openAccessibilitySettings() }
         order = []
-        timer = Timer.scheduledTimer(withTimeInterval: trusted ? 0.5 : 2, repeats: true) { [weak self] _ in self?.look() }
-        look()
+        // every 50ms: is a window being dragged? Every 0.5s: which windows are open
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     static func openAccessibilitySettings() {
@@ -403,21 +484,40 @@ final class Tiler {
     func stop() {
         timer?.invalidate()
         timer = nil
+        animation?.invalidate()
+        animation = nil
+        overlay.hide()
     }
 
-    /// The windows now open, newest first; tiles again when that changed.
-    private func look() {
+    private func tick() {
         guard AXIsProcessTrusted() else { return }
-        if timer?.timeInterval != 0.5 {
-            timer?.invalidate()
-            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.look() }
+        ticks += 1
+        if NSEvent.pressedMouseButtons & 1 != 0 {
+            pressed = true
+            dragging()
+        } else if pressed {
+            pressed = false
+            // a moment for the window to take its last position
+            let point = NSEvent.mouseLocation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self.released(at: point) }
+        } else if ticks % 10 == 0 {
+            look()
         }
+    }
+
+    /// The windows now open, newest first; tiles again when that changed, or when one was moved or resized.
+    private func look() {
+        guard animation == nil else { return }
         let open = openWindows()
         let kept = order.filter(open.contains)
         let added = open.filter { !kept.contains($0) }
-        guard added.count > 0 || kept.count != order.count else { return }
-        order = added + kept
-        retile()
+        if added.count > 0 || kept.count != order.count {
+            order = added + kept
+            retile()
+        } else {
+            // moved without the mouse (the keyboard, the app itself): back to its place
+            released(at: nil)
+        }
     }
 
     private func openWindows() -> [TiledWindow] {
@@ -435,20 +535,89 @@ final class Tiler {
             }
     }
 
+    /// The window whose top left left its place, if any.
+    private func movedWindow() -> (index: Int, frame: NSRect)? {
+        for (i, window) in order.enumerated() {
+            guard let now = frame(of: window.element), let was = settled[window] else { continue }
+            if abs(now.minX - was.minX) > 4 || abs(now.maxY - was.maxY) > 4 { return (i, now) }
+        }
+        return nil
+    }
+
+    /// While the mouse is down: show where a dragged window would go.
+    private func dragging() {
+        guard animation == nil, order.count > 1, arrangement != .single else { return }
+        if dragged == nil { dragged = movedWindow()?.index }
+        guard let dragged else { return }
+        let point = NSEvent.mouseLocation
+        if let target = slots.firstIndex(where: { $0.contains(point) }), target != dragged {
+            overlay.show(slots[target])
+        } else {
+            overlay.hide()
+        }
+    }
+
+    /// The mouse is up (or something moved a window): a window dropped on another's place swaps with it;
+    /// anything moved or resized goes back to its place.
+    private func released(at point: NSPoint?) {
+        overlay.hide()
+        dragged = nil
+        guard on, animation == nil else { return }
+        if let moved = movedWindow() {
+            let drop = point ?? NSPoint(x: moved.frame.midX, y: moved.frame.midY)
+            if arrangement != .single, let target = slots.firstIndex(where: { $0.contains(drop) }), target != moved.index {
+                order.swapAt(moved.index, target)
+            }
+            retile()
+            return
+        }
+        let resized = order.contains { window in
+            guard let now = frame(of: window.element), let was = settled[window] else { return false }
+            return abs(now.width - was.width) > 2 || abs(now.height - was.height) > 2
+        }
+        if resized { retile() }
+    }
+
     func retile() {
         guard on, AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return }
-        let area = Layout(area: screen.visibleFrame).tiles
-        // Accessibility counts from the top left of the main screen, AppKit from the bottom left
-        let top = screen.frame.maxY
-        for (window, frame) in zip(order, arrangement.frames(count: order.count, in: area)) {
-            var origin = CGPoint(x: frame.minX, y: top - frame.maxY)
-            var size = frame.integral.size
-            guard let position = AXValueCreate(.cgPoint, &origin), let extent = AXValueCreate(.cgSize, &size) else { continue }
-            // position, size, and position again: a window may refuse a size that doesn't fit where it is
-            AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
-            AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, extent)
-            AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
+        slots = arrangement.frames(count: order.count, in: Layout(area: screen.visibleFrame).tiles).map(\.integral)
+        let moves = zip(order, slots).compactMap { window, to in
+            frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
+        animate(moves)
+    }
+
+    /// Glides the windows to their places: quick at first, settling softly (ease-out).
+    private func animate(_ moves: [Move]) {
+        animation?.invalidate()
+        animation = nil
+        let finish = {
+            for move in moves {
+                setFrame(of: move.window.element, to: move.to, exact: true)
+                self.settled[move.window] = frame(of: move.window.element) ?? move.to
+            }
+        }
+        let still = moves.allSatisfy { $0.from.integral == $0.to }
+        guard !still, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return finish() }
+        let duration = 0.32
+        let begin = CACurrentMediaTime()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            let t = min((CACurrentMediaTime() - begin) / duration, 1)
+            guard t < 1 else {
+                timer.invalidate()
+                self?.animation = nil
+                return finish()
+            }
+            let e = CGFloat(1 - pow(1 - t, 4))
+            for move in moves {
+                let f = move.from, to = move.to
+                let r = NSRect(x: f.minX + (to.minX - f.minX) * e, y: f.minY + (to.minY - f.minY) * e,
+                               width: f.width + (to.width - f.width) * e, height: f.height + (to.height - f.height) * e)
+                setFrame(of: move.window.element, to: r, size: f.size != to.size)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        animation = timer
     }
 
     /// The focused window becomes the main one.

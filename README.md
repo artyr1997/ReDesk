@@ -17,7 +17,7 @@ Around them:
   - **Grid**: as square as it gets, a short last row spread across
   - **One at a Time**: each window fills the whole area
 
-  Pick one in the right-click menu (that also turns tiling on) or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on; an ad-hoc signed build loses it after a rebuild (remove ReDesk from the list in System Settings › Privacy & Security › Accessibility and turn tiling on again).
+  Pick one in the right-click menu (that also turns tiling on) or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on; an ad-hoc signed build loses it after a rebuild (remove ReDesk from the list in System Settings › Privacy & Security › Accessibility and turn tiling on again).
 
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 
