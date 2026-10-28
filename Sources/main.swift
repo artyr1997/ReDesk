@@ -1,10 +1,11 @@
 // ReDesk: the Re apps and a few quiet gauges on the desktop.
 // Corners: the apps as words (a click opens one). Left edge: the wallpapers, as dots.
-// Top: how much of the day has gone. Right edge: the battery.
+// Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
 import Carbon.HIToolbox
+import CoreAudio
 import IOKit.ps
 import ServiceManagement
 
@@ -330,6 +331,84 @@ final class BatteryView: DeskView {
     }
 }
 
+// ── sound ──
+
+/// Whether anything is playing through the current output. Core Audio only says that the
+/// device is running, not how loud, so the wave below is drawn, not measured.
+func soundPlaying() -> Bool {
+    var device = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr else { return false }
+    var running: UInt32 = 0
+    size = UInt32(MemoryLayout<UInt32>.size)
+    address.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &running) == noErr else { return false }
+    return running != 0
+}
+
+/// While sound plays: three soft sine lines drifting along the bottom, tapering to nothing at
+/// both ends. They swell in when sound starts and settle flat and away when it stops.
+final class WaveView: NSView {
+    private var playing = false
+    /// 0 (gone) … 1 (full), eased towards `playing`
+    private var strength: CGFloat = 0
+    private var frames: Timer?
+    private let waves: [(cycles: CGFloat, speed: CGFloat, height: CGFloat, alpha: CGFloat)] = [
+        (2.0, 1.6, 1.0, 0.35),
+        (3.0, -1.1, 0.7, 0.22),
+        (1.5, 0.8, 0.55, 0.14),
+    ]
+
+    func set(playing: Bool) {
+        self.playing = playing
+        if playing || strength > 0 { start() }
+    }
+
+    private func start() {
+        guard frames == nil else { return }
+        frames = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.frame() }
+    }
+
+    private func frame() {
+        strength += ((playing ? 1 : 0) - strength) * 0.04
+        if !playing && strength < 0.005 {
+            strength = 0
+            frames?.invalidate()
+            frames = nil
+        }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard strength > 0 else { return }
+        let t = CGFloat(CACurrentMediaTime())
+        let mid = bounds.midY
+        let reach = bounds.height / 2 - 2
+        for (k, wave) in waves.enumerated() {
+            // each line breathes a little on its own
+            let breath = 0.75 + 0.25 * sin(t * 0.9 + CGFloat(k) * 2.1)
+            let amplitude = reach * wave.height * breath * strength
+            let path = NSBezierPath()
+            path.lineWidth = 1.5
+            path.lineCapStyle = .round
+            var x: CGFloat = 0
+            while x <= bounds.width {
+                let u = x / bounds.width
+                let taper = pow(sin(.pi * u), 2)
+                let y = mid + amplitude * taper * sin(2 * .pi * wave.cycles * u + t * wave.speed + CGFloat(k))
+                if x == 0 { path.move(to: NSPoint(x: x, y: y)) } else { path.line(to: NSPoint(x: x, y: y)) }
+                x += 2
+            }
+            NSColor.white.withAlphaComponent(wave.alpha * strength).setStroke()
+            path.stroke()
+        }
+    }
+}
+
 final class DeskWindow: NSWindow {
     /// where this piece goes on a screen
     let frameOn: (Layout) -> NSRect
@@ -362,6 +441,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let wallpapers = WallpaperView()
     private let day = DayView()
     private let battery = BatteryView()
+    private let wave = WaveView()
     private var windows: [DeskWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -388,6 +468,14 @@ final class Desk: NSObject, NSApplicationDelegate {
         windows.append(DeskWindow(view: battery) { l in
             NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
         })
+        // the day line's twin at the bottom, between HEAR and NOTE; only to look at, clicks go through
+        let waveWindow = DeskWindow(view: wave) { l in
+            let width = l.area.width * 0.24
+            let centre = l.bottomWord - (l.bottomWord - l.area.minY) * 0.35 + 8
+            return NSRect(x: l.area.midX - width / 2, y: centre - 22, width: width, height: 44)
+        }
+        waveWindow.ignoresMouseEvents = true
+        windows.append(waveWindow)
 
         layout()
         NotificationCenter.default.addObserver(
@@ -399,6 +487,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         // a minute of the day is a few pixels at most; the battery moves slower still
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
         HotKeys.register()
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: soundPlaying()) }
     }
 
     @objc private func tick() {

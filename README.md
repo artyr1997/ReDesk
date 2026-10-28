@@ -6,6 +6,7 @@ Around them:
 - **Left edge**: the wallpapers in `wallpapers/`, as dots; the one on the desktop is a diamond. A click sets one, **⌃⌥↑ / ⌃⌥↓** step through them from anywhere.
 - **Top**: how much of the day has gone, midnight to midnight, with a mark at noon.
 - **Right edge**: the battery, filling from the bottom.
+- **Bottom**: while sound plays, three soft lines drift like a wave; they fade in and settle away when it stops. Core Audio only tells that the output is running, not how loud, so the wave is drawn, not measured.
 
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 
