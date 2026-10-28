@@ -3,7 +3,7 @@
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
-// ⌘↑/↓ make a window as big / small as it gets (tiling stops); ⌃⌥1…⌃⌥7 pick an arrangement (anywhere).
+// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops); ⌃⌥1…⌃⌥7 pick an arrangement (anywhere).
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
@@ -272,7 +272,7 @@ enum HotKeys {
 }
 
 /// ⌘ keys, only while one of the Re apps is in front (elsewhere they keep their usual meaning):
-/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ / ⌘↓ biggest / smallest window.
+/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle.
 /// Taking a key away from an app needs an event tap, which needs the Accessibility permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
@@ -311,7 +311,7 @@ enum CommandKeys {
         }
         guard flags == .maskCommand else { return nil }
         guard arrow != 0 else { return nil }
-        return { Tiler.shared.resizeFocused(biggest: arrow > 0) }
+        return { Tiler.shared.resizeFocused(wholeScreen: arrow > 0) }
     }
 }
 
@@ -719,18 +719,12 @@ final class Tiler {
         NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
-    /// The smallest size the Re apps allow (their windows' minWidth / minHeight).
-    private static let smallest = NSSize(width: 360, height: 240)
-
-    /// ⌘↑ / ⌘↓: the focused window fills the desk's middle, or shrinks to the smallest size in its centre.
+    /// ⌘↑ / ⌘↓: the focused window fills the screen (all but the menu bar and the Dock), or the desk's middle.
     /// Tiling stops, or it would put the window straight back.
-    func resizeFocused(biggest: Bool) {
+    func resizeFocused(wholeScreen: Bool) {
         guard let window = focusedWindow(), let screen = NSScreen.screens.first else { return }
         if on { on = false }
-        let area = Layout(area: screen.visibleFrame).tiles
-        let size = Tiler.smallest
-        let to = biggest ? area : NSRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2,
-                                         width: size.width, height: size.height).integral
+        let to = wholeScreen ? screen.visibleFrame : Layout(area: screen.visibleFrame).tiles.integral
         guard let from = frame(of: window.element) else { return }
         animate([Move(window: window, from: from, to: to)])
     }

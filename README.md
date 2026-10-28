@@ -28,7 +28,7 @@ Around them:
 | ⌃⌥1…⌃⌥7 | anywhere | an arrangement, tiling on |
 | ⌃⌥Space | anywhere | next arrangement |
 | ⌃⌥↩ | anywhere | the focused window becomes the main one |
-| ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the middle / shrinks to its smallest (360×240) in the centre; tiling stops |
+| ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |
 | ⌘⇧↑ / ⌘⇧↓ | in the Re apps | previous / next wallpaper |
 
 The ⌘ keys are taken only while a Re app is in front, so they keep their usual meaning everywhere else (and lose it inside the Re apps: ⌘↑ / ⌘↓ no longer jump to the top / bottom of a text there). They are read with an event tap, which needs the same Accessibility permission as tiling.
