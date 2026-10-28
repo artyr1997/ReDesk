@@ -7,7 +7,7 @@ Around them:
 - Videos play muted and looping under the desktop icons on every screen, and pause while the displays sleep. A still of the first frame (kept in `~/Library/Application Support/ReDesk`) is set as the macOS wallpaper underneath, so the choice survives a restart.
 - **Top**: how much of the day has gone, midnight to midnight, with a mark at noon.
 - **Right edge**: the battery, filling from the bottom.
-- **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept). With an ad-hoc signed build it may ask again after a rebuild.
+- **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept).
 
 **Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest is the main one and the arrangement places the rest:
   - **Main and Stack**: the main one on the left half, the others one above another on the right
@@ -17,7 +17,7 @@ Around them:
   - **Grid**: as square as it gets, a short last row spread across
   - **One at a Time**: each window fills the whole area
 
-  Pick one in the right-click menu (that also turns tiling on) or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on; an ad-hoc signed build loses it after a rebuild (remove ReDesk from the list in System Settings › Privacy & Security › Accessibility and turn tiling on again).
+  Pick one in the right-click menu (that also turns tiling on) or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
 
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 
