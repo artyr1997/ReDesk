@@ -9,6 +9,8 @@ Around them:
 - **Right edge**: the battery, filling from the bottom.
 - **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept). With an ad-hoc signed build it may ask again after a rebuild.
 
+**Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest takes the left half and the others stack on the right. **⌃⌥↩** makes the focused window the big one. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on; an ad-hoc signed build loses it after a rebuild (remove ReDesk from the list in System Settings › Privacy & Security › Accessibility and turn tiling on again).
+
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 
 The pieces sit just above the desktop icons and below every window, in the apps' side-button lettering (Noto Sans JP, upright, one letter every 32pt).
