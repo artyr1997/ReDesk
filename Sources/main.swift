@@ -1,9 +1,10 @@
 // ReDesk: the Re apps and a few quiet gauges on the desktop.
-// Corners: the apps as words (a click opens one). Left edge: the wallpapers, as dots.
+// Corners: the apps as words (a click opens one). Left edge: the wallpapers, pictures and videos, as dots.
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
+import AVFoundation
 import Carbon.HIToolbox
 import CoreAudio
 import IOKit.ps
@@ -66,31 +67,86 @@ struct Layout {
 // ── wallpapers ──
 
 enum Wallpapers {
+    static let pictures = ["jpg", "jpeg", "png", "heic"]
+    static let videos = ["mp4", "mov", "m4v"]
+
     static let all: [URL] = {
         guard let folder = Bundle.main.url(forResource: "wallpapers", withExtension: nil) else { return [] }
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        let images = ["jpg", "jpeg", "png", "heic"]
-        return files.filter { images.contains($0.pathExtension.lowercased()) }
+        return files.filter { (pictures + videos).contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }()
+
+    static func isVideo(_ url: URL) -> Bool { videos.contains(url.pathExtension.lowercased()) }
+
+    /// A still of each video becomes the macOS wallpaper underneath it, so the desktop looks
+    /// right in Mission Control and after ReDesk quits, and so the choice survives a restart.
+    static let stills: URL = {
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ReDesk", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+
+    static func still(of video: URL) -> URL {
+        stills.appendingPathComponent(video.lastPathComponent + ".jpg")
+    }
 
     static var current: Int? {
         guard let screen = NSScreen.screens.first,
               let url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
         // by name: the same picture may have been set from the repo's folder rather than the app's
-        return all.firstIndex { $0.lastPathComponent == url.lastPathComponent }
+        let name = url.lastPathComponent
+        return all.firstIndex { $0.lastPathComponent == name || still(of: $0).lastPathComponent == name }
     }
 
     static func show(_ index: Int) {
         guard all.indices.contains(index) else { return }
+        let url = all[index]
+        if isVideo(url) {
+            LiveWallpaper.shared.play(url)
+            let still = still(of: url)
+            if FileManager.default.fileExists(atPath: still.path) {
+                setDesktop(still)
+            } else {
+                makeStill(of: url, at: still) { setDesktop(still) }
+            }
+        } else {
+            LiveWallpaper.shared.stop()
+            setDesktop(url)
+        }
+        NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
+    }
+
+    private static func setDesktop(_ url: URL) {
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
             .allowClipping: true,
         ]
         for screen in NSScreen.screens {
-            try? NSWorkspace.shared.setDesktopImageURL(all[index], for: screen, options: options)
+            try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: options)
         }
         NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
+    }
+
+    private static func makeStill(of video: URL, at still: URL, then done: @escaping () -> Void) {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: video))
+        generator.appliesPreferredTrackTransform = true
+        generator.generateCGImageAsynchronously(for: .zero) { image, _, _ in
+            guard let image,
+                  let data = NSBitmapImageRep(cgImage: image).representation(using: .jpeg, properties: [.compressionFactor: 0.9]),
+                  (try? data.write(to: still)) != nil else { return }
+            DispatchQueue.main.async(execute: done)
+        }
+    }
+
+    /// Plays the video if the desktop shows one of ours, stops it if the wallpaper was changed elsewhere.
+    static func sync() {
+        if let index = current, isVideo(all[index]) {
+            LiveWallpaper.shared.play(all[index])
+        } else {
+            LiveWallpaper.shared.stop()
+        }
     }
 
     /// One step up or down the list, round and round.
@@ -98,6 +154,67 @@ enum Wallpapers {
         guard !all.isEmpty else { return }
         let from = current ?? (delta > 0 ? -1 : 0)
         show((from + delta + all.count) % all.count)
+    }
+}
+
+/// A video wallpaper: a muted, looping video in a window under the desktop icons, on every screen.
+/// It pauses while the displays sleep.
+final class LiveWallpaper {
+    static let shared = LiveWallpaper()
+
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+    private var windows: [NSWindow] = []
+    private(set) var url: URL?
+
+    func play(_ url: URL) {
+        guard url != self.url else { return }
+        stop()
+        self.url = url
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        self.player = player
+        layout()
+        player.play()
+    }
+
+    func stop() {
+        player?.pause()
+        looper = nil
+        player = nil
+        url = nil
+        windows.forEach { $0.orderOut(nil) }
+        windows = []
+    }
+
+    func pause() { player?.pause() }
+    func resume() { player?.play() }
+
+    func layout() {
+        windows.forEach { $0.orderOut(nil) }
+        windows = []
+        guard let player else { return }
+        windows = NSScreen.screens.map { screen in
+            let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isOpaque = true
+            window.backgroundColor = .black
+            window.hasShadow = false
+            window.ignoresMouseEvents = true
+            // over the macOS wallpaper, under the desktop icons
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+            let view = NSView()
+            let layer = AVPlayerLayer(player: player)
+            layer.videoGravity = .resizeAspectFill
+            view.layer = layer
+            view.wantsLayer = true
+            window.contentView = view
+            window.setFrame(screen.frame, display: true)
+            window.orderFront(nil)
+            return window
+        }
     }
 }
 
@@ -231,10 +348,16 @@ final class WallpaperView: DeskView {
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .wallpaperChanged, object: nil)
         // the wallpaper can also change in System Settings
         DistributedNotificationCenter.default().addObserver(
-            self, selector: #selector(refresh), name: Notification.Name("com.apple.desktop"), object: nil)
+            self, selector: #selector(changedElsewhere), name: Notification.Name("com.apple.desktop"), object: nil)
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// The wallpaper changed outside ReDesk (System Settings, another Space): start or stop the video to match.
+    @objc func changedElsewhere() {
+        Wallpapers.sync()
+        refresh()
+    }
 
     @objc func refresh() {
         chosen = Wallpapers.current
@@ -593,10 +716,14 @@ final class Desk: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(tick), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
-            wallpapers, selector: #selector(WallpaperView.refresh), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+            wallpapers, selector: #selector(WallpaperView.changedElsewhere), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         // a minute of the day is a few pixels at most; the battery moves slower still
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
         HotKeys.register()
+        Wallpapers.sync()
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.pause() }
+        workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
     }
 
@@ -609,6 +736,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     @objc private func layout() {
         guard let screen = NSScreen.screens.first else { return }
         windows.forEach { $0.place(on: screen) }
+        LiveWallpaper.shared.layout()
     }
 }
 

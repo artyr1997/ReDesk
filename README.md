@@ -3,7 +3,8 @@
 The Re apps as words in the corners of the desktop: FILE (ReFile) and SURF (ReSurf) at the top, HEAR (ReSound) and NOTE (ReNote) at the bottom. A click opens the app; a right click can set ReDesk to open at login, or quit it.
 
 Around them:
-- **Left edge**: the wallpapers in `wallpapers/`, as dots; the one on the desktop is a diamond. A click sets one, **⌃⌥↑ / ⌃⌥↓** step through them from anywhere.
+- **Left edge**: the wallpapers in `wallpapers/` (pictures, and videos: mp4 / mov), as dots; the one on the desktop is a diamond. A click sets one, **⌃⌥↑ / ⌃⌥↓** step through them from anywhere.
+- Videos play muted and looping under the desktop icons on every screen, and pause while the displays sleep. A still of the first frame (kept in `~/Library/Application Support/ReDesk`) is set as the macOS wallpaper underneath, so the choice survives a restart.
 - **Top**: how much of the day has gone, midnight to midnight, with a mark at noon.
 - **Right edge**: the battery, filling from the bottom.
 - **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept). With an ad-hoc signed build it may ask again after a rebuild.
