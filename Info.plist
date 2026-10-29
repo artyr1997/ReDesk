@@ -13,6 +13,7 @@
 	<key>LSMinimumSystemVersion</key><string>13.0</string>
 	<key>LSUIElement</key><true/>
 	<key>NSHighResolutionCapable</key><true/>
+	<key>NSAppleEventsUsageDescription</key><string>ReDesk switches the Mac between light and dark (⌘⇧T) through System Events.</string>
 	<key>NSAudioCaptureUsageDescription</key><string>ReDesk listens to how loud the Mac is playing to move the sound wave. Nothing is recorded or kept.</string>
 </dict>
 </plist>

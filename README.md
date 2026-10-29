@@ -31,8 +31,11 @@ Around them:
 | ⌃⌥↩ | anywhere | the focused window becomes the main one |
 | ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |
 | ⌘⇧↑ / ⌘⇧↓ | in the Re apps | previous / next wallpaper |
+| ⌘⇧T | anywhere | the Mac between light and dark (through System Events: macOS asks once) |
 
 The ⌘ keys are taken only while a Re app is in front, so they keep their usual meaning everywhere else (and lose it inside the Re apps: ⌘↑ / ⌘↓ no longer jump to the top / bottom of a text there). They are read with an event tap, which needs the same Accessibility permission as tiling.
+
+**Ink cursors**: the Re apps' brush-drawn arrow, I-beam and pointing hand become the whole Mac's cursors (light ink while the Mac is dark), set in CoreGraphics' cursor registry the way Mousecape does it; macOS 26 draws the arrow and the I-beam from new names (`…ArrowS`, `…IBeamS`), the old ones are set too for older systems. They go when ReDesk quits, or with right click › Ink Cursors.
 
 Empty parts are white at 25%, filled ones (and the chosen wallpaper) at 50%. A right click on a bar shows the time or the battery level.
 

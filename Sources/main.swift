@@ -237,6 +237,7 @@ extension Notification.Name {
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
 /// ⌃⌥T turns tiling on and off, ⌃⌥1…⌃⌥7 pick an arrangement, ⌃⌥Space goes to the next one,
 /// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place.
+/// ⌘⇧T switches the Mac between light and dark.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
     private static let keys: [(id: UInt32, key: Int)] = [
@@ -265,12 +266,14 @@ enum HotKeys {
             case 22: Tiler.shared.move(.down)
             case 23: Tiler.shared.move(.left)
             case 24: Tiler.shared.move(.right)
+            case 31: Appearance.toggle()
             default: Tiler.shared.choose(Arrangement.allCases[Int(id.id) - 11])
             }
             return noErr
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
         let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
+            + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey))]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
@@ -777,6 +780,111 @@ final class Tiler {
     }
 }
 
+// ── the Mac's appearance and cursors ──
+
+/// ⌘⇧T: the Mac between light and dark. System Events does it, so macOS asks once whether ReDesk may.
+enum Appearance {
+    static func toggle() {
+        let script = NSAppleScript(source: """
+            tell application "System Events" to tell appearance preferences to set dark mode to not dark mode
+            """)
+        var error: NSDictionary?
+        script?.executeAndReturnError(&error)
+        if let error { NSLog("ReDesk: the appearance didn't change: \(error)") }
+    }
+
+    static var dark: Bool {
+        // the global domain is part of every app's defaults
+        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
+}
+
+// CoreGraphics' cursor registry: private, the way cursor apps such as Mousecape set the whole Mac's cursors
+// (declarations as in Mousecape's CGSCursor.h).
+private typealias CGSConnectionID = Int32
+@_silgen_name("CGSMainConnectionID")
+private func CGSMainConnectionID() -> CGSConnectionID
+@_silgen_name("CGSRegisterCursorWithImages")
+private func CGSRegisterCursorWithImages(
+    _ cid: CGSConnectionID, _ name: UnsafePointer<CChar>, _ setGlobally: Bool, _ instantly: Bool,
+    _ size: CGSize, _ hotspot: CGPoint, _ frameCount: Int, _ frameDuration: CGFloat, _ images: CFArray,
+    _ seed: UnsafeMutablePointer<Int32>) -> CGError
+@_silgen_name("CoreCursorUnregisterAll")
+private func CoreCursorUnregisterAll(_ cid: CGSConnectionID) -> CGError
+
+/// The Re apps' ink cursors for every app on the Mac: the arrow, the I-beam and the pointing hand drawn
+/// with a brush (light ink while the Mac is dark). They stay until ReDesk quits or they are turned off
+/// (right click › Ink Cursors); then the Mac's own come back.
+enum InkCursors {
+    private struct Shape {
+        let names: [String]
+        let day: String
+        let night: String
+        /// the point that clicks, in a 20 × 20 cursor
+        let hotspot: CGPoint
+    }
+
+    // since macOS 26 the arrow and the I-beam are drawn from the …S names; the old ones are still
+    // accepted, without effect (Mousecape PR #308)
+    private static let shapes = [
+        Shape(names: ["com.apple.coregraphics.ArrowS", "com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowCtx"],
+              day: "cursor-arrow", night: "cursor-arrow-night", hotspot: CGPoint(x: 1, y: 1)),
+        Shape(names: ["com.apple.coregraphics.IBeamS", "com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamXOR"],
+              day: "cursor-ibeam", night: "cursor-ibeam-night", hotspot: CGPoint(x: 10, y: 10)),
+        // the hand has a white body inside its outline: it reads on both
+        Shape(names: ["com.apple.cursor.13"], day: "cursor-hand", night: "cursor-hand", hotspot: CGPoint(x: 6.5, y: 1)),
+    ]
+    private static let size = CGSize(width: 20, height: 20)
+
+    static var on: Bool {
+        get { UserDefaults.standard.object(forKey: "inkCursors") as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "inkCursors")
+            apply()
+        }
+    }
+
+    /// Sets the cursors for the current appearance, or gives the Mac its own back.
+    static func apply() {
+        let cid = CGSMainConnectionID()
+        guard on else {
+            _ = CoreCursorUnregisterAll(cid)
+            return
+        }
+        let night = Appearance.dark
+        for shape in shapes {
+            guard let images = images(night ? shape.night : shape.day) else { continue }
+            for name in shape.names {
+                var seed: Int32 = 0
+                let error = name.withCString {
+                    CGSRegisterCursorWithImages(cid, $0, true, true, size, shape.hotspot, 1, 0, images as CFArray, &seed)
+                }
+                if error != .success { NSLog("ReDesk: cursor \(name) not set: \(error.rawValue)") }
+            }
+        }
+    }
+
+    static func restore() {
+        _ = CoreCursorUnregisterAll(CGSMainConnectionID())
+    }
+
+    /// The picture at each scale the screen may want (1×, 2×, 3×, 4×).
+    private static func images(_ name: String) -> [CGImage]? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        return (1...4).compactMap { scale in
+            let side = Int(size.width) * scale
+            guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.interpolationQuality = .high
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return ctx.makeImage()
+        }
+    }
+}
+
 // ── battery ──
 
 /// 0…1, or nil on a Mac without one.
@@ -824,6 +932,14 @@ class DeskView: NSView {
             item.state = Tiler.shared.on && Tiler.shared.arrangement == arrangement ? .on : .off
         }
         menu.addItem(.separator())
+        let cursors = menu.addItem(withTitle: "Ink Cursors", action: #selector(toggleCursors), keyEquivalent: "")
+        cursors.target = self
+        cursors.state = InkCursors.on ? .on : .off
+        let theme = menu.addItem(withTitle: "Dark Appearance", action: #selector(toggleAppearance), keyEquivalent: "t")
+        theme.keyEquivalentModifierMask = [.command, .shift]
+        theme.target = self
+        theme.state = Appearance.dark ? .on : .off
+        menu.addItem(.separator())
         let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -832,6 +948,10 @@ class DeskView: NSView {
     }
 
     @objc private func toggleTiling() { Tiler.shared.on.toggle() }
+
+    @objc private func toggleCursors() { InkCursors.on.toggle() }
+
+    @objc private func toggleAppearance() { Appearance.toggle() }
 
     @objc private func allowAccessibility() { Tiler.openAccessibilitySettings() }
 
@@ -1231,6 +1351,10 @@ final class DeskWindow: NSWindow {
 }
 
 final class Desk: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        InkCursors.restore()
+    }
+
     private let wallpapers = WallpaperView()
     private let day = DayView()
     private let battery = BatteryView()
@@ -1283,6 +1407,14 @@ final class Desk: NSObject, NSApplicationDelegate {
         workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
         if Tiler.shared.on { Tiler.shared.start() }
+        InkCursors.apply()
+        // light ink at night: the cursors follow the appearance
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
+        ) { _ in
+            // the setting is written a moment after the notice
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { InkCursors.apply() }
+        }
         CommandKeys.install()
     }
 
