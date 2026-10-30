@@ -150,8 +150,8 @@ enum Wallpapers {
         let url = all[index]
         UserDefaults.standard.set(url.lastPathComponent, forKey: chosenKey)
         // what is on the desktop now stays over the new wallpaper a moment, then fades away
-        let old = LiveWallpaper.shared.url != nil ? LiveWallpaper.shared.handOver() : Crossfade.cover()
-        defer { Crossfade.lift(old) }
+        let old = LiveWallpaper.shared.url != nil ? LiveWallpaper.shared.handOver() : (windows: Crossfade.cover(), video: [])
+        defer { Crossfade.lift(old.windows, keeping: old.video) }
         if isVideo(url) {
             LiveWallpaper.shared.play(url)
             let still = still(of: url)
@@ -246,15 +246,16 @@ final class LiveWallpaper {
         windows = []
     }
 
-    /// The video's windows, taken out of its hands and raised for a crossfade; the video goes on
-    /// playing in them (their layers hold the player) until they are gone.
-    func handOver() -> [NSWindow] {
-        let old = windows
+    /// The video's windows, taken out of its hands and raised for a crossfade. Its player and looper
+    /// come along and are kept until the windows are gone: let go, the video would stop and leave
+    /// them black halfway through the fade.
+    func handOver() -> (windows: [NSWindow], video: [AnyObject]) {
+        let old = (windows, [player, looper].compactMap { $0 as AnyObject? })
         windows = []
         looper = nil
         player = nil
         url = nil
-        old.forEach { $0.level = Crossfade.level }
+        old.0.forEach { $0.level = Crossfade.level }
         return old
     }
 
@@ -272,8 +273,9 @@ final class LiveWallpaper {
         guard let player else { return }
         windows = NSScreen.screens.map { screen in
             let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            window.isOpaque = true
-            window.backgroundColor = .black
+            // clear until the video's first frame: the still under it shows, never black
+            window.isOpaque = false
+            window.backgroundColor = .clear
             window.hasShadow = false
             window.ignoresMouseEvents = true
             // over the macOS wallpaper, under the desktop icons
@@ -339,10 +341,10 @@ enum Crossfade {
 
     /// Fades the old wallpaper away once the new one shows: a video's first frame is there (or a
     /// second and a half has gone), a picture has had a moment to be drawn by macOS.
-    static func lift(_ windows: [NSWindow], waited: Double = 0) {
+    static func lift(_ windows: [NSWindow], keeping video: [AnyObject] = [], waited: Double = 0) {
         guard !windows.isEmpty else { return }
         if waited < 1.5 && (waited < 0.2 || !LiveWallpaper.shared.ready) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { lift(windows, waited: waited + 0.05) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { lift(windows, keeping: video, waited: waited + 0.05) }
             return
         }
         NSAnimationContext.runAnimationGroup({ context in
@@ -351,6 +353,7 @@ enum Crossfade {
             windows.forEach { $0.animator().alphaValue = 0 }
         }, completionHandler: {
             windows.forEach { $0.orderOut(nil) }
+            withExtendedLifetime(video) {}
         })
     }
 }
