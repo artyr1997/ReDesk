@@ -13,6 +13,7 @@ import ApplicationServices
 import AVFoundation
 import Carbon.HIToolbox
 import CoreAudio
+import ImageIO
 import IOKit.ps
 import ServiceManagement
 
@@ -36,8 +37,9 @@ let letterSize: CGFloat = 20
 let letterStep: CGFloat = 32
 let columnWidth: CGFloat = 42
 
-/// The desk's ink: white over a dark appearance's wallpapers, a near black over a light one's, as
-/// see-through either way. Resolved at each drawing, so it follows the Mac's appearance.
+/// The desk's ink: white in a dark appearance, a near black in a light one, as see-through either way.
+/// Resolved at each drawing by the window's appearance, which each piece takes from the wallpaper
+/// behind it (DeskWindow.adaptInk), or else from the Mac.
 func ink(_ alpha: CGFloat) -> NSColor {
     NSColor(name: nil) { appearance in
         let night = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -1362,6 +1364,56 @@ final class WaveView: NSView {
     }
 }
 
+/// How light the wallpaper is behind each piece of the desk, which decides its ink: white over a dark
+/// part of it, near black over a light one. A video is judged by its still (the macOS wallpaper under it).
+enum Backdrop {
+    private static var small: (url: URL, image: CGImage)?
+
+    /// the desktop picture, a few hundred pixels wide
+    private static func image(on screen: NSScreen) -> CGImage? {
+        guard let url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
+        if let small, small.url == url { return small.image }
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 400,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        small = (url, image)
+        return image
+    }
+
+    /// 0 (black) … 1 (white): the wallpaper's average behind `frame` (screen coordinates), or nil
+    /// while there is no picture to look at.
+    static func lightness(behind frame: NSRect, on screen: NSScreen) -> CGFloat? {
+        guard let image = image(on: screen) else { return nil }
+        let s = screen.frame
+        let (w, h) = (CGFloat(image.width), CGFloat(image.height))
+        // the picture fills the screen, cut evenly at the sides that stick out (as wallpapers are shown)
+        let scale = max(s.width / w, s.height / h)
+        let cutX = (w * scale - s.width) / 2, cutY = (h * scale - s.height) / 2
+        // screen points (from the bottom) → the picture's pixels (from the top)
+        let rect = CGRect(x: (frame.minX - s.minX + cutX) / scale, y: (s.maxY - frame.maxY + cutY) / scale,
+                          width: frame.width / scale, height: frame.height / scale)
+            .integral.intersection(CGRect(x: 0, y: 0, width: w, height: h))
+        guard !rect.isEmpty, let part = image.cropping(to: rect) else { return nil }
+        // averaged by drawing it small
+        let side = 8
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        guard let ctx = CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .medium
+        ctx.draw(part, in: CGRect(x: 0, y: 0, width: side, height: side))
+        var sum: CGFloat = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            sum += 0.2126 * CGFloat(pixels[i]) + 0.7152 * CGFloat(pixels[i + 1]) + 0.0722 * CGFloat(pixels[i + 2])
+        }
+        return sum / CGFloat(side * side) / 255
+    }
+}
+
 final class DeskWindow: NSWindow {
     /// where this piece goes on a screen
     let frameOn: (Layout) -> NSRect
@@ -1387,6 +1439,16 @@ final class DeskWindow: NSWindow {
     func place(on screen: NSScreen) {
         setFrame(frameOn(Layout(area: screen.visibleFrame)).integral, display: true)
         orderFront(nil)
+        adaptInk(on: screen)
+    }
+
+    /// White ink over a dark part of the wallpaper, near black over a light one (ink(_:) resolves by
+    /// the window's appearance); the Mac's appearance decides while there is no picture to look at.
+    func adaptInk(on screen: NSScreen) {
+        // a margin round the piece: its letters are seen against what is around them too
+        let lightness = Backdrop.lightness(behind: frame.insetBy(dx: -16, dy: -16), on: screen)
+        appearance = lightness.map { NSAppearance(named: $0 < 0.55 ? .darkAqua : .aqua) } ?? nil
+        contentView?.needsDisplay = true
     }
 }
 
@@ -1447,6 +1509,11 @@ final class Desk: NSObject, NSApplicationDelegate {
         workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
         if Tiler.shared.on { Tiler.shared.start() }
+        // another wallpaper: each piece looks at what is behind it now
+        NotificationCenter.default.addObserver(forName: .wallpaperChanged, object: nil, queue: .main) { [weak self] _ in
+            guard let screen = NSScreen.screens.first else { return }
+            self?.windows.forEach { $0.adaptInk(on: screen) }
+        }
         InkCursors.apply()
         // light ink at night: the cursors follow the appearance
         DistributedNotificationCenter.default().addObserver(
@@ -1458,7 +1525,7 @@ final class Desk: NSObject, NSApplicationDelegate {
                 // the other folder's wallpapers: another one on the desktop, another column of dots
                 Wallpapers.appearanceChanged()
                 self?.layout()
-                // the ink turns with it
+                // the ink turns with it (where there's no wallpaper to look at)
                 self?.windows.forEach { $0.contentView?.needsDisplay = true }
                 NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
             }

@@ -37,7 +37,7 @@ The ⌘ keys are taken only while a Re app is in front, so they keep their usual
 
 **Ink cursors**: the Re apps' brush-drawn arrow, I-beam and pointing hand become the whole Mac's cursors (light ink while the Mac is dark), set in CoreGraphics' cursor registry the way Mousecape does it; macOS 26 draws the arrow and the I-beam from new names (`…ArrowS`, `…IBeamS`), the old ones are set too for older systems. They go when ReDesk quits, or with right click › Ink Cursors.
 
-Empty parts are at 25%, filled ones (and the chosen wallpaper) at 50%: in white while the Mac is dark, in a near black while it is light. A right click on a bar shows the time or the battery level.
+Empty parts are at 25%, filled ones (and the chosen wallpaper) at 50%. Each piece takes its ink from the wallpaper behind it: white over a dark part, a near black over a light one (a video is judged by its still); without a picture to look at, by the Mac's appearance. A right click on a bar shows the time or the battery level.
 
 The pieces sit just above the desktop icons and below every window, in the apps' side-button lettering (Noto Sans JP, upright, one letter every 32pt).
 
