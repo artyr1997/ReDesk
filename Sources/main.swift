@@ -1533,8 +1533,26 @@ final class DeskWindow: NSWindow {
     func adaptInk(on screen: NSScreen) {
         // a margin round the piece: its letters are seen against what is around them too
         let lightness = Backdrop.lightness(behind: frame.insetBy(dx: -16, dy: -16), on: screen)
-        appearance = lightness.map { NSAppearance(named: $0 < 0.55 ? .darkAqua : .aqua) } ?? nil
-        contentView?.needsDisplay = true
+        let ink = lightness.map { NSAppearance(named: $0 < 0.55 ? .darkAqua : .aqua) } ?? nil
+        if ink?.name != appearance?.name {
+            appearance = ink
+            redrawFading()
+        } else {
+            contentView?.needsDisplay = true
+        }
+    }
+
+    /// Redraws the piece with its old look fading into the new one (the ink turned with the
+    /// wallpaper or the Mac's appearance), as the wallpaper itself does.
+    func redrawFading() {
+        guard let view = contentView else { return }
+        view.wantsLayer = true
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = 0.9
+        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        view.layer?.add(fade, forKey: "ink")
+        view.needsDisplay = true
     }
 }
 
@@ -1612,7 +1630,7 @@ final class Desk: NSObject, NSApplicationDelegate {
                 Wallpapers.appearanceChanged()
                 self?.layout()
                 // the ink turns with it (where there's no wallpaper to look at)
-                self?.windows.forEach { $0.contentView?.needsDisplay = true }
+                self?.windows.forEach { $0.redrawFading() }
                 NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
             }
         }
