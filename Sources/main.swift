@@ -149,6 +149,9 @@ enum Wallpapers {
         guard all.indices.contains(index) else { return }
         let url = all[index]
         UserDefaults.standard.set(url.lastPathComponent, forKey: chosenKey)
+        // what is on the desktop now stays over the new wallpaper a moment, then fades away
+        let old = LiveWallpaper.shared.url != nil ? LiveWallpaper.shared.handOver() : Crossfade.cover()
+        defer { Crossfade.lift(old) }
         if isVideo(url) {
             LiveWallpaper.shared.play(url)
             let still = still(of: url)
@@ -243,6 +246,23 @@ final class LiveWallpaper {
         windows = []
     }
 
+    /// The video's windows, taken out of its hands and raised for a crossfade; the video goes on
+    /// playing in them (their layers hold the player) until they are gone.
+    func handOver() -> [NSWindow] {
+        let old = windows
+        windows = []
+        looper = nil
+        player = nil
+        url = nil
+        old.forEach { $0.level = Crossfade.level }
+        return old
+    }
+
+    /// the new video has its first frame on every screen
+    var ready: Bool {
+        windows.allSatisfy { ($0.contentView?.layer as? AVPlayerLayer)?.isReadyForDisplay ?? true }
+    }
+
     func pause() { player?.pause() }
     func resume() { player?.play() }
 
@@ -269,6 +289,69 @@ final class LiveWallpaper {
             window.orderFront(nil)
             return window
         }
+    }
+}
+
+/// A change of wallpaper is a crossfade: the old one, in windows over the new one, fades away
+/// once the new one is on the screen.
+enum Crossfade {
+    /// over the video wallpaper (the desktop's level + 1), under the desktop icons
+    static let level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 2)
+    static let duration = 1.2
+
+    /// windows showing the macOS wallpaper as it is now, one per screen
+    static func cover() -> [NSWindow] {
+        NSScreen.screens.compactMap { screen in
+            guard let url = NSWorkspace.shared.desktopImageURL(for: screen),
+                  let image = picture(url, for: screen) else { return nil }
+            let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+            window.ignoresMouseEvents = true
+            window.level = level
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+            let view = NSView()
+            let layer = CALayer()
+            layer.contents = image
+            // as the wallpaper is set: filling the screen, the overflow cut off
+            layer.contentsGravity = .resizeAspectFill
+            layer.masksToBounds = true
+            view.layer = layer
+            view.wantsLayer = true
+            window.contentView = view
+            window.setFrame(screen.frame, display: true)
+            window.orderFront(nil)
+            return window
+        }
+    }
+
+    /// the picture at the screen's size (a wallpaper can be far bigger, and this is on the way to a click)
+    private static func picture(_ url: URL, for screen: NSScreen) -> CGImage? {
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(screen.frame.width, screen.frame.height) * screen.backingScaleFactor,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
+    }
+
+    /// Fades the old wallpaper away once the new one shows: a video's first frame is there (or a
+    /// second and a half has gone), a picture has had a moment to be drawn by macOS.
+    static func lift(_ windows: [NSWindow], waited: Double = 0) {
+        guard !windows.isEmpty else { return }
+        if waited < 1.5 && (waited < 0.2 || !LiveWallpaper.shared.ready) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { lift(windows, waited: waited + 0.05) }
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            windows.forEach { $0.animator().alphaValue = 0 }
+        }, completionHandler: {
+            windows.forEach { $0.orderOut(nil) }
+        })
     }
 }
 
