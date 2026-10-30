@@ -291,9 +291,12 @@ final class LiveWallpaper {
             // over the macOS wallpaper, under the desktop icons
             window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
             window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
-            // the video over its still (its first frame), which shows at once, while the video loads
-            let view = NSView()
+            // the video over its still (its first frame), which shows at once, while the video loads.
+            // The view has the screen's size from the start: the video layer grows with it
+            // (autoresizing), and a view growing from nothing would make it twice the screen.
+            let view = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
             let base = CALayer()
+            base.frame = view.bounds
             if let url, let still = Crossfade.picture(Wallpapers.still(of: url), for: screen) {
                 base.contents = still
                 base.contentsGravity = .resizeAspectFill
@@ -301,7 +304,7 @@ final class LiveWallpaper {
             }
             let video = AVPlayerLayer(player: player)
             video.videoGravity = .resizeAspectFill
-            video.frame = CGRect(origin: .zero, size: screen.frame.size)
+            video.frame = base.bounds
             video.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             base.addSublayer(video)
             view.layer = base
