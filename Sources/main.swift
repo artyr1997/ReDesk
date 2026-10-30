@@ -1,9 +1,11 @@
 // ReDesk: the Re apps and a few quiet gauges on the desktop.
-// Corners: the apps as words (a click opens one). Left edge: the wallpapers, pictures and videos, as dots.
+// Corners: the apps as words (a click opens one). Left edge: the wallpapers, pictures and videos, as dots
+// (wallpapers/Light or wallpapers/Dark, as the Mac's appearance is).
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
-// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops); ⌃⌥1…⌃⌥7 pick an arrangement (anywhere).
+// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops); ⌃⌥1…⌃⌥7 pick an arrangement (anywhere);
+// ⌘⇧T switches the Mac between light and dark (anywhere).
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
@@ -82,12 +84,26 @@ enum Wallpapers {
     static let pictures = ["jpg", "jpeg", "png", "heic"]
     static let videos = ["mp4", "mov", "m4v"]
 
-    static let all: [URL] = {
-        guard let folder = Bundle.main.url(forResource: "wallpapers", withExtension: nil) else { return [] }
+    /// wallpapers/Light and wallpapers/Dark: for the Mac's light and dark appearance
+    private static func folder(_ name: String) -> [URL] {
+        guard let root = Bundle.main.url(forResource: "wallpapers", withExtension: nil) else { return [] }
+        let folder = root.appendingPathComponent(name, isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         return files.filter { (pictures + videos).contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-    }()
+    }
+
+    private static let light = folder("Light")
+    private static let dark = folder("Dark")
+
+    /// The wallpapers of the appearance the Mac is in (the other folder's while this one is empty).
+    static var all: [URL] {
+        let (mine, other) = Appearance.dark ? (dark, light) : (light, dark)
+        return mine.isEmpty ? other : mine
+    }
+
+    /// the wallpaper last chosen in each appearance
+    private static var chosenKey: String { Appearance.dark ? "wallpaper.dark" : "wallpaper.light" }
 
     static func isVideo(_ url: URL) -> Bool { videos.contains(url.pathExtension.lowercased()) }
 
@@ -115,6 +131,7 @@ enum Wallpapers {
     static func show(_ index: Int) {
         guard all.indices.contains(index) else { return }
         let url = all[index]
+        UserDefaults.standard.set(url.lastPathComponent, forKey: chosenKey)
         if isVideo(url) {
             LiveWallpaper.shared.play(url)
             let still = still(of: url)
@@ -159,6 +176,14 @@ enum Wallpapers {
         } else {
             LiveWallpaper.shared.stop()
         }
+    }
+
+    /// The Mac went light or dark (or ReDesk just started): this appearance's wallpaper, the one
+    /// last chosen in it, or its first. One of its own already on the desktop stays.
+    static func appearanceChanged() {
+        if current != nil { return sync() }
+        let remembered = UserDefaults.standard.string(forKey: chosenKey)
+        show(all.firstIndex { $0.lastPathComponent == remembered } ?? 0)
     }
 
     /// One step up or down the list, round and round.
@@ -1401,7 +1426,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         // a minute of the day is a few pixels at most; the battery moves slower still
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
         HotKeys.register()
-        Wallpapers.sync()
+        Wallpapers.appearanceChanged()
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.pause() }
         workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
@@ -1413,7 +1438,13 @@ final class Desk: NSObject, NSApplicationDelegate {
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
         ) { _ in
             // the setting is written a moment after the notice
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { InkCursors.apply() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                InkCursors.apply()
+                // the other folder's wallpapers: another one on the desktop, another column of dots
+                Wallpapers.appearanceChanged()
+                self?.layout()
+                NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
+            }
         }
         CommandKeys.install()
     }
