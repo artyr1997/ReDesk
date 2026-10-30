@@ -145,13 +145,13 @@ enum Wallpapers {
         return all.firstIndex { $0.lastPathComponent == name || still(of: $0).lastPathComponent == name }
     }
 
-    static func show(_ index: Int) {
+    static func show(_ index: Int, fading duration: Double = Crossfade.duration) {
         guard all.indices.contains(index) else { return }
         let url = all[index]
         UserDefaults.standard.set(url.lastPathComponent, forKey: chosenKey)
         // what is on the desktop now stays over the new wallpaper a moment, then fades away
         let old = LiveWallpaper.shared.url != nil ? LiveWallpaper.shared.handOver() : (windows: Crossfade.cover(), video: [])
-        defer { Crossfade.lift(old.windows, keeping: old.video) }
+        defer { Crossfade.lift(old.windows, keeping: old.video, over: duration) }
         if isVideo(url) {
             LiveWallpaper.shared.play(url)
             let still = still(of: url)
@@ -203,7 +203,8 @@ enum Wallpapers {
     static func appearanceChanged() {
         if current != nil { return sync() }
         let remembered = UserDefaults.standard.string(forKey: chosenKey)
-        show(all.firstIndex { $0.lastPathComponent == remembered } ?? 0)
+        // as fast as the apps' own change of look (their app.css), so the desk turns with them
+        show(all.firstIndex { $0.lastPathComponent == remembered } ?? 0, fading: Crossfade.themeDuration)
     }
 
     /// One step up or down the list, round and round.
@@ -259,9 +260,18 @@ final class LiveWallpaper {
         return old
     }
 
+    private func videoLayer(of window: NSWindow) -> AVPlayerLayer? {
+        window.contentView?.layer?.sublayers?.lazy.compactMap { $0 as? AVPlayerLayer }.first
+    }
+
     /// the new video has its first frame on every screen
     var ready: Bool {
-        windows.allSatisfy { ($0.contentView?.layer as? AVPlayerLayer)?.isReadyForDisplay ?? true }
+        windows.allSatisfy { videoLayer(of: $0)?.isReadyForDisplay ?? true }
+    }
+
+    /// the video's still lies under it on every screen: the new wallpaper shows before the video plays
+    var stillShown: Bool {
+        !windows.isEmpty && windows.allSatisfy { $0.contentView?.layer?.contents != nil }
     }
 
     func pause() { player?.pause() }
@@ -273,7 +283,7 @@ final class LiveWallpaper {
         guard let player else { return }
         windows = NSScreen.screens.map { screen in
             let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            // clear until the video's first frame: the still under it shows, never black
+            // clear where nothing is drawn yet: never black
             window.isOpaque = false
             window.backgroundColor = .clear
             window.hasShadow = false
@@ -281,10 +291,20 @@ final class LiveWallpaper {
             // over the macOS wallpaper, under the desktop icons
             window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
             window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+            // the video over its still (its first frame), which shows at once, while the video loads
             let view = NSView()
-            let layer = AVPlayerLayer(player: player)
-            layer.videoGravity = .resizeAspectFill
-            view.layer = layer
+            let base = CALayer()
+            if let url, let still = Crossfade.picture(Wallpapers.still(of: url), for: screen) {
+                base.contents = still
+                base.contentsGravity = .resizeAspectFill
+                base.masksToBounds = true
+            }
+            let video = AVPlayerLayer(player: player)
+            video.videoGravity = .resizeAspectFill
+            video.frame = CGRect(origin: .zero, size: screen.frame.size)
+            video.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            base.addSublayer(video)
+            view.layer = base
             view.wantsLayer = true
             window.contentView = view
             window.setFrame(screen.frame, display: true)
@@ -300,6 +320,7 @@ enum Crossfade {
     /// over the video wallpaper (the desktop's level + 1), under the desktop icons
     static let level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 2)
     static let duration = 1.2
+    static let themeDuration = 0.7
 
     /// windows showing the macOS wallpaper as it is now, one per screen
     static func cover() -> [NSWindow] {
@@ -329,7 +350,7 @@ enum Crossfade {
     }
 
     /// the picture at the screen's size (a wallpaper can be far bigger, and this is on the way to a click)
-    private static func picture(_ url: URL, for screen: NSScreen) -> CGImage? {
+    static func picture(_ url: URL, for screen: NSScreen) -> CGImage? {
         let options = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: max(screen.frame.width, screen.frame.height) * screen.backingScaleFactor,
@@ -339,12 +360,16 @@ enum Crossfade {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
     }
 
-    /// Fades the old wallpaper away once the new one shows: a video's first frame is there (or a
-    /// second and a half has gone), a picture has had a moment to be drawn by macOS.
-    static func lift(_ windows: [NSWindow], keeping video: [AnyObject] = [], waited: Double = 0) {
+    /// Fades the old wallpaper away once the new one shows: at once over a video's still (its first
+    /// frame, under the video until it plays), else once the video's first frame is there (or a second
+    /// and a half has gone); a picture has a moment to be drawn by macOS.
+    static func lift(_ windows: [NSWindow], keeping video: [AnyObject] = [], over duration: Double = duration, waited: Double = 0) {
         guard !windows.isEmpty else { return }
-        if waited < 1.5 && (waited < 0.2 || !LiveWallpaper.shared.ready) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { lift(windows, keeping: video, waited: waited + 0.05) }
+        let shown = LiveWallpaper.shared.url == nil ? waited >= 0.2 : (LiveWallpaper.shared.stillShown || LiveWallpaper.shared.ready)
+        if waited < 1.5 && !shown {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                lift(windows, keeping: video, over: duration, waited: waited + 0.05)
+            }
             return
         }
         NSAnimationContext.runAnimationGroup({ context in
@@ -921,9 +946,10 @@ enum Appearance {
         if let error { NSLog("ReDesk: the appearance didn't change: \(error)") }
     }
 
+    /// As the app sees it: this turns the moment the Mac does, together with every other app
+    /// (the AppleInterfaceStyle default is written a moment later).
     static var dark: Bool {
-        // the global domain is part of every app's defaults
-        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 }
 
@@ -1549,7 +1575,7 @@ final class DeskWindow: NSWindow {
         view.wantsLayer = true
         let fade = CATransition()
         fade.type = .fade
-        fade.duration = 0.9
+        fade.duration = Crossfade.themeDuration
         fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         view.layer?.add(fade, forKey: "ink")
         view.needsDisplay = true
@@ -1619,22 +1645,34 @@ final class Desk: NSObject, NSApplicationDelegate {
             self?.windows.forEach { $0.adaptInk(on: screen) }
         }
         InkCursors.apply()
-        // light ink at night: the cursors follow the appearance
+        // light ink at night: the cursors follow the appearance. The app's own appearance turns the
+        // moment the Mac's does, together with the other apps; the notice is a second way to hear of it.
+        night = Appearance.dark
+        appearanceWatch = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.appearanceTurned() }
+        }
         DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
-        ) { _ in
-            // the setting is written a moment after the notice
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                InkCursors.apply()
-                // the other folder's wallpapers: another one on the desktop, another column of dots
-                Wallpapers.appearanceChanged()
-                self?.layout()
-                // the ink turns with it (where there's no wallpaper to look at)
-                self?.windows.forEach { $0.redrawFading() }
-                NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
-            }
+        ) { [weak self] _ in
+            self?.appearanceTurned()
         }
         CommandKeys.install()
+    }
+
+    private var night = false
+    private var appearanceWatch: NSKeyValueObservation?
+
+    /// The Mac turned light or dark (heard once, however it is told).
+    private func appearanceTurned() {
+        guard Appearance.dark != night else { return }
+        night = Appearance.dark
+        InkCursors.apply()
+        // the other folder's wallpapers: another one on the desktop, another column of dots
+        Wallpapers.appearanceChanged()
+        layout()
+        // the ink turns with it (where there's no wallpaper to look at)
+        windows.forEach { $0.redrawFading() }
+        NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
     }
 
     @objc private func tick() {
