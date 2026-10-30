@@ -36,9 +36,24 @@ let letterSize: CGFloat = 20
 let letterStep: CGFloat = 32
 let columnWidth: CGFloat = 42
 
+/// The desk's ink: white over a dark appearance's wallpapers, a near black over a light one's, as
+/// see-through either way. Resolved at each drawing, so it follows the Mac's appearance.
+func ink(_ alpha: CGFloat) -> NSColor {
+    NSColor(name: nil) { appearance in
+        let night = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return (night ? NSColor.white : NSColor(white: 0.08, alpha: 1)).withAlphaComponent(alpha)
+    }
+}
+
 /// Gauges: the empty part at 25%, the filled part (and the chosen wallpaper) at 50%.
-let faint = NSColor.white.withAlphaComponent(0.25)
-let strong = NSColor.white.withAlphaComponent(0.5)
+let faint = ink(0.25)
+let strong = ink(0.5)
+/// the day's "now": a soft grey-green, darker by day
+let nowInk = NSColor(name: nil) { appearance in
+    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(srgbRed: 0xAD / 255, green: 0xB5 / 255, blue: 0xB4 / 255, alpha: 1)
+        : NSColor(srgbRed: 0x4F / 255, green: 0x57 / 255, blue: 0x56 / 255, alpha: 1)
+}
 let barWidth: CGFloat = 4
 
 /// The apps' side-button font, shipped inside ReDesk; the system font if it can't be loaded.
@@ -475,7 +490,7 @@ final class DropOverlay {
     private final class Outline: NSView {
         override func draw(_ dirtyRect: NSRect) {
             let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 14, yRadius: 14)
-            NSColor.white.withAlphaComponent(0.14).setFill()
+            ink(0.14).setFill()
             path.fill()
             strong.setStroke()
             path.lineWidth = 2
@@ -1028,7 +1043,7 @@ final class WordView: DeskView {
     override func draw(_ dirtyRect: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: letterFont,
-            .foregroundColor: NSColor.white.withAlphaComponent(hovered ? 0.95 : 0.5),
+            .foregroundColor: ink(hovered ? 0.95 : 0.5),
         ]
         for (i, letter) in corner.word.enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
@@ -1096,7 +1111,7 @@ final class WallpaperView: DeskView {
 
 let diamondSize: CGFloat = 13
 
-/// The mark for "this one" (the strong white) or "now" (solid #ADB5B4).
+/// The mark for "this one" (the strong ink) or "now" (solid grey-green).
 func drawDiamond(at c: NSPoint, color: NSColor = strong) {
     let r = diamondSize / 2
     let path = NSBezierPath()
@@ -1109,7 +1124,7 @@ func drawDiamond(at c: NSPoint, color: NSColor = strong) {
     path.fill()
 }
 
-/// A thin rounded bar: `filled` of it in the strong white, from the left (or the bottom), the rest faint.
+/// A thin rounded bar: `filled` of it in the strong ink, from the left (or the bottom), the rest faint.
 func drawBar(in rect: NSRect, filled: Double, vertical: Bool) {
     let radius = barWidth / 2
     faint.setFill()
@@ -1135,7 +1150,7 @@ final class DayView: DeskView {
         NSRect(x: bounds.midX - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
         // kept inside the window so it is never cut at midnight's ends
         let r = diamondSize / 2
-        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY), color: NSColor(srgbRed: 0xAD / 255, green: 0xB5 / 255, blue: 0xB4 / 255, alpha: 1))
+        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY), color: nowInk)
     }
 
     override func menuItems() -> [NSMenuItem] {
@@ -1341,7 +1356,7 @@ final class WaveView: NSView {
                 x += 2
             }
             // quiet sound draws fainter lines too
-            NSColor.white.withAlphaComponent(wave.alpha * min(1, strength * 1.6)).setStroke()
+            ink(wave.alpha * min(1, strength * 1.6)).setStroke()
             path.stroke()
         }
     }
@@ -1443,6 +1458,8 @@ final class Desk: NSObject, NSApplicationDelegate {
                 // the other folder's wallpapers: another one on the desktop, another column of dots
                 Wallpapers.appearanceChanged()
                 self?.layout()
+                // the ink turns with it
+                self?.windows.forEach { $0.contentView?.needsDisplay = true }
                 NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
             }
         }
