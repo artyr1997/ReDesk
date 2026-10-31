@@ -4,7 +4,7 @@
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
-// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops); ⌃⌥1…⌃⌥7 pick an arrangement (anywhere);
+// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops), ⌘1…⌘7 pick an arrangement;
 // ⌘⇧T switches the Mac between light and dark (anywhere).
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
@@ -391,14 +391,14 @@ extension Notification.Name {
 }
 
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
-/// ⌃⌥T turns tiling on and off, ⌃⌥1…⌃⌥7 pick an arrangement, ⌃⌥Space goes to the next one,
+/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement (⌘1…⌘7 pick one: CommandKeys),
 /// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place.
 /// ⌘⇧T switches the Mac between light and dark.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
     private static let keys: [(id: UInt32, key: Int)] = [
         (1, kVK_UpArrow), (2, kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space), (6, kVK_LeftArrow), (7, kVK_RightArrow),
-    ] + zip(UInt32(11)..., [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7]).map { ($0, $1) }
+    ]
     /// with ⇧ as well
     private static let shifted: [(id: UInt32, key: Int)] = [
         (21, kVK_UpArrow), (22, kVK_DownArrow), (23, kVK_LeftArrow), (24, kVK_RightArrow),
@@ -423,7 +423,7 @@ enum HotKeys {
             case 23: Tiler.shared.move(.left)
             case 24: Tiler.shared.move(.right)
             case 31: Appearance.toggle()
-            default: Tiler.shared.choose(Arrangement.allCases[Int(id.id) - 11])
+            default: break
             }
             return noErr
         }, 1, &spec, nil, nil)
@@ -440,7 +440,7 @@ enum HotKeys {
 }
 
 /// ⌘ keys, only while one of the Re apps is in front (elsewhere they keep their usual meaning):
-/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle.
+/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle, ⌘1…⌘7 an arrangement.
 /// Taking a key away from an app needs an event tap, which needs the Accessibility permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
@@ -468,6 +468,8 @@ enum CommandKeys {
         CGEvent.tapEnable(tap: port, enable: true)
     }
 
+    private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
+
     private static func action(for event: CGEvent) -> (() -> Void)? {
         let flags = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
         guard flags.contains(.maskCommand),
@@ -478,6 +480,10 @@ enum CommandKeys {
             return { Wallpapers.step(-arrow) }
         }
         guard flags == .maskCommand else { return nil }
+        // ⌘1…⌘7: an arrangement (in the order of the right-click menu), tiling on
+        if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
+            return { Tiler.shared.choose(Arrangement.allCases[number]) }
+        }
         guard arrow != 0 else { return nil }
         return { Tiler.shared.resizeFocused(wholeScreen: arrow > 0) }
     }
@@ -918,7 +924,7 @@ final class Tiler {
         animate([Move(window: window, from: from, to: to)])
     }
 
-    /// ⌃⌥1…⌃⌥7: this arrangement, with tiling on.
+    /// ⌘1…⌘7 (in the Re apps): this arrangement, with tiling on.
     func choose(_ arrangement: Arrangement) {
         self.arrangement = arrangement
         on = true
@@ -1082,7 +1088,7 @@ class DeskView: NSView {
         for arrangement in Arrangement.allCases {
             let number = Arrangement.allCases.firstIndex(of: arrangement)! + 1
             let item = menu.addItem(withTitle: arrangement.title, action: #selector(arrange(_:)), keyEquivalent: "\(number)")
-            item.keyEquivalentModifierMask = [.control, .option]
+            item.keyEquivalentModifierMask = .command
             item.target = self
             item.representedObject = arrangement.rawValue
             item.indentationLevel = 1
