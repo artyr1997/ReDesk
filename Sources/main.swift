@@ -584,28 +584,37 @@ enum Arrangement: String, CaseIterable {
             return Array(repeating: area, count: count)
         case .golden:
             // the Fibonacci spiral: each window takes the golden part (1 / φ ≈ 61.8%) of what is left,
-            // turning inward clockwise (left, top, right, bottom); the last one takes the rest
+            // turning inward clockwise (left, top, right, bottom). It turns only while both parts stay
+            // as big as a Re app can be (360 × 240): the windows left then share the rest as a grid, or, where
+            // even that would make them smaller, take it together, one over another (as in One at a Time)
             let golden = (5.0.squareRoot() - 1) / 2
+            let smallest = NSSize(width: 360, height: 240)
+            let fits = { (r: NSRect) in r.width >= smallest.width && r.height >= smallest.height }
             var rest = area
             var frames: [NSRect] = []
             for turn in 0 ..< count - 1 {
                 let w = (rest.width - tileGap) * golden, h = (rest.height - tileGap) * golden
+                let piece: NSRect, after: NSRect
                 switch turn % 4 {
                 case 0:
-                    frames.append(NSRect(x: rest.minX, y: rest.minY, width: w, height: rest.height))
-                    rest = NSRect(x: rest.minX + w + tileGap, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
+                    piece = NSRect(x: rest.minX, y: rest.minY, width: w, height: rest.height)
+                    after = NSRect(x: rest.minX + w + tileGap, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
                 case 1:
-                    frames.append(NSRect(x: rest.minX, y: rest.maxY - h, width: rest.width, height: h))
-                    rest = NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: rest.height - h - tileGap)
+                    piece = NSRect(x: rest.minX, y: rest.maxY - h, width: rest.width, height: h)
+                    after = NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: rest.height - h - tileGap)
                 case 2:
-                    frames.append(NSRect(x: rest.maxX - w, y: rest.minY, width: w, height: rest.height))
-                    rest = NSRect(x: rest.minX, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
+                    piece = NSRect(x: rest.maxX - w, y: rest.minY, width: w, height: rest.height)
+                    after = NSRect(x: rest.minX, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
                 default:
-                    frames.append(NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: h))
-                    rest = NSRect(x: rest.minX, y: rest.minY + h + tileGap, width: rest.width, height: rest.height - h - tileGap)
+                    piece = NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: h)
+                    after = NSRect(x: rest.minX, y: rest.minY + h + tileGap, width: rest.width, height: rest.height - h - tileGap)
                 }
+                guard fits(piece), fits(after) else { break }
+                frames.append(piece)
+                rest = after
             }
-            return frames + [rest]
+            let shared = Arrangement.grid.frames(count: count - frames.count, in: rest)
+            return frames + (shared.allSatisfy(fits) ? shared : Array(repeating: rest, count: shared.count))
         }
     }
 }

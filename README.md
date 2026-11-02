@@ -16,7 +16,7 @@ Around them:
   - **Columns** / **Rows**: all equal, side by side / one above another
   - **Grid**: as square as it gets, a short last row spread across
   - **One at a Time**: each window fills the whole area
-  - **Golden Spiral**: the Fibonacci spiral: each window takes the golden part (61.8%) of what is left, turning inward (left, top, right, bottom); the last one takes the rest
+  - **Golden Spiral**: the Fibonacci spiral: each window takes the golden part (61.8%) of what is left, turning inward (left, top, right, bottom); the last one takes the rest. It turns only while the windows stay as big as a Re app can be (360 × 240); the ones left share the rest as a grid, or take it together, one over another, where a grid would make them smaller
 
   Pick one in the right-click menu or with **⌘1…⌘8** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌃⌥⇧ arrows** move it to its neighbour's place. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
 
