@@ -89,6 +89,11 @@ struct Layout {
     var dayLine: CGFloat { topWord + (area.maxY - topWord) * 0.35 - 8 }
     /// the wave: the day line's twin at the bottom
     var waveLine: CGFloat { bottomWord - (bottomWord - area.minY) * 0.35 + 8 }
+    /// Full Screen: the bar of apps across the top of the screen, and the windows under it
+    static let barHeight: CGFloat = 36
+    var bar: NSRect { NSRect(x: area.minX, y: area.maxY - Layout.barHeight, width: area.width, height: Layout.barHeight) }
+    var underBar: NSRect { NSRect(x: area.minX, y: area.minY, width: area.width, height: area.height - Layout.barHeight) }
+
     /// where tiled windows go: between the side columns, 40pt under the day line and over the wave
     var tiles: NSRect {
         NSRect(x: leftX + 56, y: waveLine + 40, width: rightX - leftX - 112, height: dayLine - waveLine - 80)
@@ -388,6 +393,8 @@ enum Crossfade {
 
 extension Notification.Name {
     static let wallpaperChanged = Notification.Name("ReDeskWallpaperChanged")
+    /// tiling turned on or off, or another arrangement
+    static let arrangementChanged = Notification.Name("ReDeskArrangementChanged")
 }
 
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
@@ -527,7 +534,7 @@ func stacked(_ r: NSRect, _ count: Int) -> [NSRect] {
 
 /// Where the windows go; the first window is the main one.
 enum Arrangement: String, CaseIterable {
-    case main, mainTop, centre, columns, rows, grid, single, golden
+    case main, mainTop, centre, columns, rows, grid, single, full
 
     var title: String {
         switch self {
@@ -538,9 +545,12 @@ enum Arrangement: String, CaseIterable {
         case .rows: "Rows"
         case .grid: "Grid"
         case .single: "One at a Time"
-        case .golden: "Golden Spiral"
+        case .full: "Full Screen"
         }
     }
+
+    /// One at a Time and Full Screen: all the windows in one place, the focused one on top
+    var stacks: Bool { self == .single || self == .full }
 
     func frames(count: Int, in area: NSRect) -> [NSRect] {
         guard count > 1 else { return count == 1 ? [area] : [] }
@@ -579,42 +589,10 @@ enum Arrangement: String, CaseIterable {
             return stacked(area, down).enumerated().flatMap { row, strip in
                 sideBySide(strip, min(across, count - row * across))
             }
-        case .single:
-            // every window fills the area; the focused one is on top
+        case .single, .full:
+            // every window fills the area (Full Screen's is the screen less the bar of apps at its top);
+            // the focused one is on top
             return Array(repeating: area, count: count)
-        case .golden:
-            // the Fibonacci spiral: each window takes the golden part (1 / φ ≈ 61.8%) of what is left,
-            // turning inward clockwise (left, top, right, bottom). It turns only while both parts stay
-            // as big as a Re app can be (360 × 240): the windows left then share the rest as a grid, or, where
-            // even that would make them smaller, take it together, one over another (as in One at a Time)
-            let golden = (5.0.squareRoot() - 1) / 2
-            let smallest = NSSize(width: 360, height: 240)
-            let fits = { (r: NSRect) in r.width >= smallest.width && r.height >= smallest.height }
-            var rest = area
-            var frames: [NSRect] = []
-            for turn in 0 ..< count - 1 {
-                let w = (rest.width - tileGap) * golden, h = (rest.height - tileGap) * golden
-                let piece: NSRect, after: NSRect
-                switch turn % 4 {
-                case 0:
-                    piece = NSRect(x: rest.minX, y: rest.minY, width: w, height: rest.height)
-                    after = NSRect(x: rest.minX + w + tileGap, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
-                case 1:
-                    piece = NSRect(x: rest.minX, y: rest.maxY - h, width: rest.width, height: h)
-                    after = NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: rest.height - h - tileGap)
-                case 2:
-                    piece = NSRect(x: rest.maxX - w, y: rest.minY, width: w, height: rest.height)
-                    after = NSRect(x: rest.minX, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
-                default:
-                    piece = NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: h)
-                    after = NSRect(x: rest.minX, y: rest.minY + h + tileGap, width: rest.width, height: rest.height - h - tileGap)
-                }
-                guard fits(piece), fits(after) else { break }
-                frames.append(piece)
-                rest = after
-            }
-            let shared = Arrangement.grid.frames(count: count - frames.count, in: rest)
-            return frames + (shared.allSatisfy(fits) ? shared : Array(repeating: rest, count: shared.count))
         }
     }
 }
@@ -693,6 +671,7 @@ final class Tiler {
         didSet {
             UserDefaults.standard.set(on, forKey: Tiler.key)
             if on { start() } else { stop() }
+            NotificationCenter.default.post(name: .arrangementChanged, object: nil)
         }
     }
 
@@ -700,6 +679,7 @@ final class Tiler {
         didSet {
             UserDefaults.standard.set(arrangement.rawValue, forKey: "arrangement")
             retile()
+            NotificationCenter.default.post(name: .arrangementChanged, object: nil)
         }
     }
 
@@ -805,7 +785,7 @@ final class Tiler {
 
     /// While the mouse is down: show where a dragged window would go.
     private func dragging() {
-        guard animation == nil, order.count > 1, arrangement != .single else { return }
+        guard animation == nil, order.count > 1, !arrangement.stacks else { return }
         if dragged == nil { dragged = movedWindow()?.index }
         guard let dragged else { return }
         let point = NSEvent.mouseLocation
@@ -824,7 +804,7 @@ final class Tiler {
         guard on, animation == nil else { return }
         if let moved = movedWindow() {
             let drop = point ?? NSPoint(x: moved.frame.midX, y: moved.frame.midY)
-            if arrangement != .single, let target = slots.firstIndex(where: { $0.contains(drop) }), target != moved.index {
+            if !arrangement.stacks, let target = slots.firstIndex(where: { $0.contains(drop) }), target != moved.index {
                 order.swapAt(moved.index, target)
             }
             retile()
@@ -839,7 +819,8 @@ final class Tiler {
 
     func retile() {
         guard on, AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return }
-        slots = arrangement.frames(count: order.count, in: Layout(area: screen.visibleFrame).tiles).map(\.integral)
+        let layout = Layout(area: screen.visibleFrame)
+        slots = arrangement.frames(count: order.count, in: arrangement == .full ? layout.underBar : layout.tiles).map(\.integral)
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
@@ -918,7 +899,7 @@ final class Tiler {
 
     private func neighbour(of current: TiledWindow, among windows: [TiledWindow], toward direction: Direction) -> TiledWindow? {
         let target: TiledWindow?
-        if on && arrangement == .single, let at = windows.firstIndex(of: current) {
+        if on && arrangement.stacks, let at = windows.firstIndex(of: current) {
             let step = direction == .right || direction == .down ? 1 : -1
             target = windows[(at + step + windows.count) % windows.count]
         } else if let from = place(of: current) {
@@ -1207,6 +1188,70 @@ final class WordView: DeskView {
             let size = text.size()
             let y = bounds.maxY - CGFloat(i + 1) * letterStep + (letterStep - size.height) / 2
             text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: y))
+        }
+    }
+}
+
+/// Full Screen's bar of apps across the top of the screen: FILE  SURF  HEAR  NOTE, in the apps' small
+/// letters (as their corner buttons in a small window); the app in front in full ink, a click goes to one.
+final class AppBarView: DeskView {
+    private static let font = NSFont(name: "NotoSansJP-Regular", size: 13) ?? .systemFont(ofSize: 13, weight: .light)
+    private static let spacing: CGFloat = 0.3 * 13
+    private static let gap: CGFloat = 40
+    private var hovered: Int? { didSet { needsDisplay = true } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(frontChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    @objc private func frontChanged() { needsDisplay = true }
+
+    private func text(_ word: String, alpha: CGFloat) -> NSAttributedString {
+        NSAttributedString(string: word, attributes: [.font: AppBarView.font, .kern: AppBarView.spacing, .foregroundColor: ink(alpha)])
+    }
+
+    /// where each word is drawn, centred on the bar as a row
+    private func places() -> [NSRect] {
+        let sizes = corners.map { text($0.word, alpha: 1).size() }
+        let total = sizes.reduce(0) { $0 + $1.width } + AppBarView.gap * CGFloat(sizes.count - 1)
+        var x = (bounds.width - total) / 2
+        return sizes.map { size in
+            defer { x += size.width + AppBarView.gap }
+            return NSRect(x: x, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways], owner: self))
+    }
+
+    private func word(at event: NSEvent) -> Int? {
+        let point = convert(event.locationInWindow, from: nil)
+        return places().firstIndex { $0.insetBy(dx: -AppBarView.gap / 2, dy: -8).contains(point) }
+    }
+
+    override func mouseMoved(with event: NSEvent) { hovered = word(at: event) }
+    override func mouseExited(with event: NSEvent) { hovered = nil }
+    override func mouseDown(with event: NSEvent) {
+        if let i = word(at: event) { open(corners[i]) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        for (i, place) in places().enumerated() {
+            let corner = corners[i]
+            let alpha: CGFloat = corner.bundle == front || hovered == i ? 0.95 : 0.5
+            text(corner.word, alpha: alpha).draw(at: place.origin)
+            // the app in front: a short line under its word
+            if corner.bundle == front {
+                ink(0.95).setFill()
+                NSRect(x: place.minX, y: place.minY - 4, width: place.width - AppBarView.spacing, height: 1.5).fill()
+            }
         }
     }
 }
@@ -1635,6 +1680,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let battery = BatteryView()
     private let wave = WaveView()
     private var windows: [DeskWindow] = []
+    private let bar = DeskWindow(view: AppBarView()) { l in l.bar }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         windows = corners.map { corner in
@@ -1682,10 +1728,14 @@ final class Desk: NSObject, NSApplicationDelegate {
         workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.resume() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
         if Tiler.shared.on { Tiler.shared.start() }
+        NotificationCenter.default.addObserver(forName: .arrangementChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.showBar()
+        }
         // another wallpaper: each piece looks at what is behind it now
         NotificationCenter.default.addObserver(forName: .wallpaperChanged, object: nil, queue: .main) { [weak self] _ in
             guard let screen = NSScreen.screens.first else { return }
             self?.windows.forEach { $0.adaptInk(on: screen) }
+            if self?.bar.isVisible == true { self?.bar.adaptInk(on: screen) }
         }
         InkCursors.apply()
         // light ink at night: the cursors follow the appearance. The app's own appearance turns the
@@ -1715,6 +1765,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         layout()
         // the ink turns with it (where there's no wallpaper to look at)
         windows.forEach { $0.redrawFading() }
+        bar.redrawFading()
         NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
     }
 
@@ -1729,6 +1780,17 @@ final class Desk: NSObject, NSApplicationDelegate {
         windows.forEach { $0.place(on: screen) }
         LiveWallpaper.shared.layout()
         Tiler.shared.retile()
+        showBar()
+    }
+
+    /// The bar of apps: only while the windows are in Full Screen.
+    private func showBar() {
+        guard let screen = NSScreen.screens.first else { return }
+        if Tiler.shared.on && Tiler.shared.arrangement == .full {
+            bar.place(on: screen)
+        } else {
+            bar.orderOut(nil)
+        }
     }
 }
 
