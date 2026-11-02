@@ -1187,13 +1187,83 @@ final class WordView: DeskView {
     }
 }
 
-/// Full Screen's way between the apps: FILE  SURF  HEAR  NOTE in the Mac's menu bar, in the apps' small
-/// letters (as their corner buttons in a small window); the app in front in full ink and underlined,
-/// a click goes to one (or opens it).
+/// Full Screen's way between the apps: FILE  SURF  HEAR  NOTE across the top of the screen, in the apps'
+/// small letters (as their corner buttons in a small window); the app in front in full ink and underlined,
+/// a click goes to one (or opens it). In the Mac's menu bar while it stays; where it hides (it comes
+/// only when the mouse goes up), on the desk in its place (AppStripView), the menu bar coming over it.
+var menuBarHides: Bool { UserDefaults.standard.bool(forKey: "_HIHideMenuBar") }
+
+private let appWordFont = NSFont(name: "NotoSansJP-Regular", size: 12) ?? .systemFont(ofSize: 12, weight: .light)
+
+func appWord(_ corner: Corner, color: NSColor, inFront: Bool) -> NSAttributedString {
+    var attributes: [NSAttributedString.Key: Any] = [.font: appWordFont, .kern: 0.3 * appWordFont.pointSize, .foregroundColor: color]
+    if inFront { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+    return NSAttributedString(string: corner.word, attributes: attributes)
+}
+
+/// The words on the desk where the hidden menu bar would be: two each side of the camera's notch,
+/// or the four in the middle on a screen without one.
+final class AppStripView: DeskView {
+    private static let gap: CGFloat = 36
+    private var hovered: Int? { didSet { needsDisplay = true } }
+    /// the parts of the strip either side of the notch, in this view's coordinates (empty: no notch)
+    var sides: [NSRect] = [] { didSet { needsDisplay = true } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(frontChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    @objc private func frontChanged() { needsDisplay = true }
+
+    /// where each word is drawn: a row centred in each part of the strip
+    private func places() -> [NSRect] {
+        let groups: [(NSRect, ArraySlice<Corner>)] = sides.count == 2
+            ? [(sides[0], corners[0 ..< 2]), (sides[1], corners[2 ..< 4])]
+            : [(bounds, corners[...])]
+        return groups.flatMap { area, words -> [NSRect] in
+            let sizes = words.map { appWord($0, color: .black, inFront: false).size() }
+            let total = sizes.reduce(0) { $0 + $1.width } + AppStripView.gap * CGFloat(sizes.count - 1)
+            var x = area.midX - total / 2
+            return sizes.map { size in
+                defer { x += size.width + AppStripView.gap }
+                return NSRect(x: x, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
+            }
+        }
+    }
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways], owner: self))
+    }
+
+    private func word(at event: NSEvent) -> Int? {
+        let point = convert(event.locationInWindow, from: nil)
+        return places().firstIndex { $0.insetBy(dx: -AppStripView.gap / 2, dy: -8).contains(point) }
+    }
+
+    override func mouseMoved(with event: NSEvent) { hovered = word(at: event) }
+    override func mouseExited(with event: NSEvent) { hovered = nil }
+    override func mouseDown(with event: NSEvent) {
+        if let i = word(at: event) { open(corners[i]) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        for (i, place) in places().enumerated() {
+            let inFront = corners[i].bundle == front
+            appWord(corners[i], color: ink(inFront || hovered == i ? 0.95 : 0.5), inFront: inFront).draw(at: place.origin)
+        }
+    }
+}
+
+/// The words in the menu bar, while it stays.
 final class AppMenuBar: NSObject {
     static let shared = AppMenuBar()
     private var items: [(corner: Corner, item: NSStatusItem)] = []
-    private let font = NSFont(name: "NotoSansJP-Regular", size: 12) ?? .systemFont(ofSize: 12, weight: .light)
 
     override init() {
         super.init()
@@ -1225,14 +1295,8 @@ final class AppMenuBar: NSObject {
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         for (corner, item) in items {
             let inFront = corner.bundle == front
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .kern: 0.3 * font.pointSize,
-                // the menu bar's own ink, light or dark as it is
-                .foregroundColor: NSColor.labelColor.withAlphaComponent(inFront ? 1 : 0.55),
-            ]
-            if inFront { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-            item.button?.attributedTitle = NSAttributedString(string: corner.word, attributes: attributes)
+            // the menu bar's own ink, light or dark as it is
+            item.button?.attributedTitle = appWord(corner, color: NSColor.labelColor.withAlphaComponent(inFront ? 1 : 0.55), inFront: inFront)
         }
     }
 
@@ -1666,6 +1730,9 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let battery = BatteryView()
     private let wave = WaveView()
     private var windows: [DeskWindow] = []
+    private let strip = AppStripView()
+    /// placed by showStrip(), over the strip the hidden menu bar leaves at the top of the screen
+    private lazy var stripWindow = DeskWindow(view: strip) { l in l.area }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         windows = corners.map { corner in
@@ -1720,6 +1787,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .wallpaperChanged, object: nil, queue: .main) { [weak self] _ in
             guard let screen = NSScreen.screens.first else { return }
             self?.windows.forEach { $0.adaptInk(on: screen) }
+            if self?.stripWindow.isVisible == true { self?.stripWindow.adaptInk(on: screen) }
         }
         InkCursors.apply()
         // light ink at night: the cursors follow the appearance. The app's own appearance turns the
@@ -1749,6 +1817,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         layout()
         // the ink turns with it (where there's no wallpaper to look at)
         windows.forEach { $0.redrawFading() }
+        stripWindow.redrawFading()
         NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
     }
 
@@ -1766,9 +1835,25 @@ final class Desk: NSObject, NSApplicationDelegate {
         showBar()
     }
 
-    /// The apps in the menu bar: only while the windows are in Full Screen.
+    /// The apps across the top: only while the windows are in Full Screen. In the menu bar while it stays,
+    /// on the desk in its strip while it hides.
     private func showBar() {
-        AppMenuBar.shared.shown = Tiler.shared.on && Tiler.shared.arrangement == .full
+        let full = Tiler.shared.on && Tiler.shared.arrangement == .full
+        AppMenuBar.shared.shown = full && !menuBarHides
+        guard full && menuBarHides, let screen = NSScreen.screens.first, screen.frame.maxY > screen.visibleFrame.maxY else {
+            return stripWindow.orderOut(nil)
+        }
+        let frame = NSRect(x: screen.frame.minX, y: screen.visibleFrame.maxY,
+                           width: screen.frame.width, height: screen.frame.maxY - screen.visibleFrame.maxY)
+        stripWindow.setFrame(frame, display: true)
+        // either side of the camera's notch, if the screen has one
+        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            strip.sides = [left, right].map { NSRect(x: $0.minX - frame.minX, y: 0, width: $0.width, height: frame.height) }
+        } else {
+            strip.sides = []
+        }
+        stripWindow.orderFront(nil)
+        stripWindow.adaptInk(on: screen)
     }
 }
 
