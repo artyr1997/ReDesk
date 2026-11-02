@@ -1200,7 +1200,8 @@ func appWord(_ corner: Corner, color: NSColor) -> NSAttributedString {
 }
 
 /// The words on the desk where the hidden menu bar would be, spread across the screen: the same space
-/// between each two and at the ends (which keeps them clear of the camera's notch, in the middle).
+/// between each two and at the ends, then each a little further from the middle (15%), which keeps
+/// them clear of the camera's notch there.
 final class AppStripView: DeskView {
     private var hovered: Int? { didSet { needsDisplay = true } }
 
@@ -1227,7 +1228,8 @@ final class AppStripView: DeskView {
         return corners.map { corner in
             let size = appWord(corner, color: .black).size()
             defer { x += size.width + gap }
-            return NSRect(x: x, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
+            let middle = bounds.midX + (x + size.width / 2 - bounds.midX) * 1.15
+            return NSRect(x: middle - size.width / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
         }
     }
 
