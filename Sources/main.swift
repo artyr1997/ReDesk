@@ -1199,13 +1199,10 @@ func appWord(_ corner: Corner, color: NSColor) -> NSAttributedString {
     NSAttributedString(string: corner.word, attributes: [.font: appWordFont, .kern: 0.4 * appWordFont.pointSize, .foregroundColor: color])
 }
 
-/// The words on the desk where the hidden menu bar would be: two each side of the camera's notch,
-/// or the four in the middle on a screen without one.
+/// The words on the desk where the hidden menu bar would be, spread across the screen: the same space
+/// between each two and at the ends (which keeps them clear of the camera's notch, in the middle).
 final class AppStripView: DeskView {
-    private static let gap: CGFloat = 72
     private var hovered: Int? { didSet { needsDisplay = true } }
-    /// the parts of the strip either side of the notch, in this view's coordinates (empty: no notch)
-    var sides: [NSRect] = [] { didSet { needsDisplay = true } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -1217,19 +1214,20 @@ final class AppStripView: DeskView {
 
     @objc private func frontChanged() { needsDisplay = true }
 
-    /// where each word is drawn: a row centred in each part of the strip
+    /// the space between two words, and between the screen's edges and the words at the ends
+    private var gap: CGFloat {
+        let words = corners.reduce(0) { $0 + appWord($1, color: .black).size().width }
+        return (bounds.width - words) / CGFloat(corners.count + 1)
+    }
+
+    /// where each word is drawn
     private func places() -> [NSRect] {
-        let groups: [(NSRect, ArraySlice<Corner>)] = sides.count == 2
-            ? [(sides[0], corners[0 ..< 2]), (sides[1], corners[2 ..< 4])]
-            : [(bounds, corners[...])]
-        return groups.flatMap { area, words -> [NSRect] in
-            let sizes = words.map { appWord($0, color: .black).size() }
-            let total = sizes.reduce(0) { $0 + $1.width } + AppStripView.gap * CGFloat(sizes.count - 1)
-            var x = area.midX - total / 2
-            return sizes.map { size in
-                defer { x += size.width + AppStripView.gap }
-                return NSRect(x: x, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
-            }
+        let gap = gap
+        var x = bounds.minX + gap
+        return corners.map { corner in
+            let size = appWord(corner, color: .black).size()
+            defer { x += size.width + gap }
+            return NSRect(x: x, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
         }
     }
 
@@ -1240,7 +1238,7 @@ final class AppStripView: DeskView {
 
     private func word(at event: NSEvent) -> Int? {
         let point = convert(event.locationInWindow, from: nil)
-        return places().firstIndex { $0.insetBy(dx: -AppStripView.gap / 2, dy: -8).contains(point) }
+        return places().firstIndex { $0.insetBy(dx: -24, dy: -8).contains(point) }
     }
 
     override func mouseMoved(with event: NSEvent) { hovered = word(at: event) }
@@ -1844,12 +1842,6 @@ final class Desk: NSObject, NSApplicationDelegate {
         let frame = NSRect(x: screen.frame.minX, y: screen.visibleFrame.maxY,
                            width: screen.frame.width, height: screen.frame.maxY - screen.visibleFrame.maxY)
         stripWindow.setFrame(frame, display: true)
-        // either side of the camera's notch, if the screen has one
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            strip.sides = [left, right].map { NSRect(x: $0.minX - frame.minX, y: 0, width: $0.width, height: frame.height) }
-        } else {
-            strip.sides = []
-        }
         stripWindow.orderFront(nil)
         stripWindow.adaptInk(on: screen)
     }
