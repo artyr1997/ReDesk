@@ -16,8 +16,9 @@ Around them:
   - **Columns** / **Rows**: all equal, side by side / one above another
   - **Grid**: as square as it gets, a short last row spread across
   - **One at a Time**: each window fills the whole area
+  - **Golden Spiral**: the Fibonacci spiral: each window takes the golden part (61.8%) of what is left, turning inward (left, top, right, bottom); the last one takes the rest
 
-  Pick one in the right-click menu or with **⌘1…⌘7** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌃⌥⇧ arrows** move it to its neighbour's place. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
+  Pick one in the right-click menu or with **⌘1…⌘8** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌃⌥⇧ arrows** move it to its neighbour's place. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved or resized by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
 
 **Keys**
 
@@ -26,7 +27,7 @@ Around them:
 | ⌃⌥← ⌃⌥→ ⌃⌥↑ ⌃⌥↓ | anywhere | focus the nearest window that way (in One at a Time: back and forth through them) |
 | ⌃⌥⇧← ⌃⌥⇧→ ⌃⌥⇧↑ ⌃⌥⇧↓ | anywhere, while tiling | the focused window trades places with the nearest one that way (in One at a Time: moves back / forth in the turn) |
 | ⌃⌥T | anywhere | tiling on / off |
-| ⌘1…⌘7 | in the Re apps | an arrangement, tiling on |
+| ⌘1…⌘8 | in the Re apps | an arrangement, tiling on |
 | ⌃⌥Space | anywhere | next arrangement |
 | ⌃⌥↩ | anywhere | the focused window becomes the main one |
 | ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |

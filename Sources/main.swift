@@ -4,7 +4,7 @@
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
-// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops), ⌘1…⌘7 pick an arrangement;
+// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops), ⌘1…⌘8 pick an arrangement;
 // ⌘⇧T switches the Mac between light and dark (anywhere).
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
@@ -391,7 +391,7 @@ extension Notification.Name {
 }
 
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
-/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement (⌘1…⌘7 pick one: CommandKeys),
+/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement (⌘1…⌘8 pick one: CommandKeys),
 /// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place.
 /// ⌘⇧T switches the Mac between light and dark.
 enum HotKeys {
@@ -440,7 +440,7 @@ enum HotKeys {
 }
 
 /// ⌘ keys, only while one of the Re apps is in front (elsewhere they keep their usual meaning):
-/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle, ⌘1…⌘7 an arrangement.
+/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle, ⌘1…⌘8 an arrangement.
 /// Taking a key away from an app needs an event tap, which needs the Accessibility permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
@@ -480,7 +480,7 @@ enum CommandKeys {
             return { Wallpapers.step(-arrow) }
         }
         guard flags == .maskCommand else { return nil }
-        // ⌘1…⌘7: an arrangement (in the order of the right-click menu), tiling on
+        // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
         if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
             return { Tiler.shared.choose(Arrangement.allCases[number]) }
         }
@@ -527,7 +527,7 @@ func stacked(_ r: NSRect, _ count: Int) -> [NSRect] {
 
 /// Where the windows go; the first window is the main one.
 enum Arrangement: String, CaseIterable {
-    case main, mainTop, centre, columns, rows, grid, single
+    case main, mainTop, centre, columns, rows, grid, single, golden
 
     var title: String {
         switch self {
@@ -538,6 +538,7 @@ enum Arrangement: String, CaseIterable {
         case .rows: "Rows"
         case .grid: "Grid"
         case .single: "One at a Time"
+        case .golden: "Golden Spiral"
         }
     }
 
@@ -581,6 +582,30 @@ enum Arrangement: String, CaseIterable {
         case .single:
             // every window fills the area; the focused one is on top
             return Array(repeating: area, count: count)
+        case .golden:
+            // the Fibonacci spiral: each window takes the golden part (1 / φ ≈ 61.8%) of what is left,
+            // turning inward clockwise (left, top, right, bottom); the last one takes the rest
+            let golden = (5.0.squareRoot() - 1) / 2
+            var rest = area
+            var frames: [NSRect] = []
+            for turn in 0 ..< count - 1 {
+                let w = (rest.width - tileGap) * golden, h = (rest.height - tileGap) * golden
+                switch turn % 4 {
+                case 0:
+                    frames.append(NSRect(x: rest.minX, y: rest.minY, width: w, height: rest.height))
+                    rest = NSRect(x: rest.minX + w + tileGap, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
+                case 1:
+                    frames.append(NSRect(x: rest.minX, y: rest.maxY - h, width: rest.width, height: h))
+                    rest = NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: rest.height - h - tileGap)
+                case 2:
+                    frames.append(NSRect(x: rest.maxX - w, y: rest.minY, width: w, height: rest.height))
+                    rest = NSRect(x: rest.minX, y: rest.minY, width: rest.width - w - tileGap, height: rest.height)
+                default:
+                    frames.append(NSRect(x: rest.minX, y: rest.minY, width: rest.width, height: h))
+                    rest = NSRect(x: rest.minX, y: rest.minY + h + tileGap, width: rest.width, height: rest.height - h - tileGap)
+                }
+            }
+            return frames + [rest]
         }
     }
 }
@@ -924,7 +949,7 @@ final class Tiler {
         animate([Move(window: window, from: from, to: to)])
     }
 
-    /// ⌘1…⌘7 (in the Re apps): this arrangement, with tiling on.
+    /// ⌘1…⌘8 (in the Re apps): this arrangement, with tiling on.
     func choose(_ arrangement: Arrangement) {
         self.arrangement = arrangement
         on = true
