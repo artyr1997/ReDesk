@@ -1188,23 +1188,21 @@ final class WordView: DeskView {
 }
 
 /// Full Screen's way between the apps: FILE  SURF  HEAR  NOTE across the top of the screen, in the apps'
-/// small letters (as their corner buttons in a small window); the app in front in full ink and underlined,
+/// small letters (as their corner buttons in a small window); the app in front in full ink,
 /// a click goes to one (or opens it). In the Mac's menu bar while it stays; where it hides (it comes
 /// only when the mouse goes up), on the desk in its place (AppStripView), the menu bar coming over it.
 var menuBarHides: Bool { UserDefaults.standard.bool(forKey: "_HIHideMenuBar") }
 
-private let appWordFont = NSFont(name: "NotoSansJP-Regular", size: 12) ?? .systemFont(ofSize: 12, weight: .light)
+private let appWordFont = NSFont(name: "NotoSansJP-Regular", size: 15) ?? .systemFont(ofSize: 15, weight: .light)
 
-func appWord(_ corner: Corner, color: NSColor, inFront: Bool) -> NSAttributedString {
-    var attributes: [NSAttributedString.Key: Any] = [.font: appWordFont, .kern: 0.3 * appWordFont.pointSize, .foregroundColor: color]
-    if inFront { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-    return NSAttributedString(string: corner.word, attributes: attributes)
+func appWord(_ corner: Corner, color: NSColor) -> NSAttributedString {
+    NSAttributedString(string: corner.word, attributes: [.font: appWordFont, .kern: 0.4 * appWordFont.pointSize, .foregroundColor: color])
 }
 
 /// The words on the desk where the hidden menu bar would be: two each side of the camera's notch,
 /// or the four in the middle on a screen without one.
 final class AppStripView: DeskView {
-    private static let gap: CGFloat = 36
+    private static let gap: CGFloat = 72
     private var hovered: Int? { didSet { needsDisplay = true } }
     /// the parts of the strip either side of the notch, in this view's coordinates (empty: no notch)
     var sides: [NSRect] = [] { didSet { needsDisplay = true } }
@@ -1225,7 +1223,7 @@ final class AppStripView: DeskView {
             ? [(sides[0], corners[0 ..< 2]), (sides[1], corners[2 ..< 4])]
             : [(bounds, corners[...])]
         return groups.flatMap { area, words -> [NSRect] in
-            let sizes = words.map { appWord($0, color: .black, inFront: false).size() }
+            let sizes = words.map { appWord($0, color: .black).size() }
             let total = sizes.reduce(0) { $0 + $1.width } + AppStripView.gap * CGFloat(sizes.count - 1)
             var x = area.midX - total / 2
             return sizes.map { size in
@@ -1255,7 +1253,7 @@ final class AppStripView: DeskView {
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         for (i, place) in places().enumerated() {
             let inFront = corners[i].bundle == front
-            appWord(corners[i], color: ink(inFront || hovered == i ? 0.95 : 0.5), inFront: inFront).draw(at: place.origin)
+            appWord(corners[i], color: ink(inFront || hovered == i ? 0.95 : 0.45)).draw(at: place.origin)
         }
     }
 }
@@ -1296,7 +1294,7 @@ final class AppMenuBar: NSObject {
         for (corner, item) in items {
             let inFront = corner.bundle == front
             // the menu bar's own ink, light or dark as it is
-            item.button?.attributedTitle = appWord(corner, color: NSColor.labelColor.withAlphaComponent(inFront ? 1 : 0.55), inFront: inFront)
+            item.button?.attributedTitle = appWord(corner, color: NSColor.labelColor.withAlphaComponent(inFront ? 1 : 0.5))
         }
     }
 
