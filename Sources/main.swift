@@ -89,11 +89,6 @@ struct Layout {
     var dayLine: CGFloat { topWord + (area.maxY - topWord) * 0.35 - 8 }
     /// the wave: the day line's twin at the bottom
     var waveLine: CGFloat { bottomWord - (bottomWord - area.minY) * 0.35 + 8 }
-    /// Full Screen: the bar of apps across the top of the screen, and the windows under it
-    static let barHeight: CGFloat = 36
-    var bar: NSRect { NSRect(x: area.minX, y: area.maxY - Layout.barHeight, width: area.width, height: Layout.barHeight) }
-    var underBar: NSRect { NSRect(x: area.minX, y: area.minY, width: area.width, height: area.height - Layout.barHeight) }
-
     /// where tiled windows go: between the side columns, 40pt under the day line and over the wave
     var tiles: NSRect {
         NSRect(x: leftX + 56, y: waveLine + 40, width: rightX - leftX - 112, height: dayLine - waveLine - 80)
@@ -590,8 +585,8 @@ enum Arrangement: String, CaseIterable {
                 sideBySide(strip, min(across, count - row * across))
             }
         case .single, .full:
-            // every window fills the area (Full Screen's is the screen less the bar of apps at its top);
-            // the focused one is on top
+            // every window fills the area (Full Screen's is the whole screen under the menu bar, which then
+            // shows the apps: AppMenuBar); the focused one is on top
             return Array(repeating: area, count: count)
         }
     }
@@ -820,7 +815,7 @@ final class Tiler {
     func retile() {
         guard on, AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return }
         let layout = Layout(area: screen.visibleFrame)
-        slots = arrangement.frames(count: order.count, in: arrangement == .full ? layout.underBar : layout.tiles).map(\.integral)
+        slots = arrangement.frames(count: order.count, in: arrangement == .full ? layout.area : layout.tiles).map(\.integral)
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
@@ -1192,67 +1187,58 @@ final class WordView: DeskView {
     }
 }
 
-/// Full Screen's bar of apps across the top of the screen: FILE  SURF  HEAR  NOTE, in the apps' small
-/// letters (as their corner buttons in a small window); the app in front in full ink, a click goes to one.
-final class AppBarView: DeskView {
-    private static let font = NSFont(name: "NotoSansJP-Regular", size: 13) ?? .systemFont(ofSize: 13, weight: .light)
-    private static let spacing: CGFloat = 0.3 * 13
-    private static let gap: CGFloat = 40
-    private var hovered: Int? { didSet { needsDisplay = true } }
+/// Full Screen's way between the apps: FILE  SURF  HEAR  NOTE in the Mac's menu bar, in the apps' small
+/// letters (as their corner buttons in a small window); the app in front in full ink and underlined,
+/// a click goes to one (or opens it).
+final class AppMenuBar: NSObject {
+    static let shared = AppMenuBar()
+    private var items: [(corner: Corner, item: NSStatusItem)] = []
+    private let font = NSFont(name: "NotoSansJP-Regular", size: 12) ?? .systemFont(ofSize: 12, weight: .light)
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    override init() {
+        super.init()
         NSWorkspace.shared.notificationCenter.addObserver(
-            self, selector: #selector(frontChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+            self, selector: #selector(redraw), name: NSWorkspace.didActivateApplicationNotification, object: nil)
     }
 
-    required init?(coder: NSCoder) { nil }
-
-    @objc private func frontChanged() { needsDisplay = true }
-
-    private func text(_ word: String, alpha: CGFloat) -> NSAttributedString {
-        NSAttributedString(string: word, attributes: [.font: AppBarView.font, .kern: AppBarView.spacing, .foregroundColor: ink(alpha)])
-    }
-
-    /// where each word is drawn, centred on the bar as a row
-    private func places() -> [NSRect] {
-        let sizes = corners.map { text($0.word, alpha: 1).size() }
-        let total = sizes.reduce(0) { $0 + $1.width } + AppBarView.gap * CGFloat(sizes.count - 1)
-        var x = (bounds.width - total) / 2
-        return sizes.map { size in
-            defer { x += size.width + AppBarView.gap }
-            return NSRect(x: x, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
-        }
-    }
-
-    override func updateTrackingAreas() {
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways], owner: self))
-    }
-
-    private func word(at event: NSEvent) -> Int? {
-        let point = convert(event.locationInWindow, from: nil)
-        return places().firstIndex { $0.insetBy(dx: -AppBarView.gap / 2, dy: -8).contains(point) }
-    }
-
-    override func mouseMoved(with event: NSEvent) { hovered = word(at: event) }
-    override func mouseExited(with event: NSEvent) { hovered = nil }
-    override func mouseDown(with event: NSEvent) {
-        if let i = word(at: event) { open(corners[i]) }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        for (i, place) in places().enumerated() {
-            let corner = corners[i]
-            let alpha: CGFloat = corner.bundle == front || hovered == i ? 0.95 : 0.5
-            text(corner.word, alpha: alpha).draw(at: place.origin)
-            // the app in front: a short line under its word
-            if corner.bundle == front {
-                ink(0.95).setFill()
-                NSRect(x: place.minX, y: place.minY - 4, width: place.width - AppBarView.spacing, height: 1.5).fill()
+    var shown: Bool {
+        get { !items.isEmpty }
+        set {
+            guard newValue != shown else { return }
+            if newValue {
+                // a new item goes to the left of the ones there: NOTE first, so FILE ends up leftmost
+                items = corners.reversed().map { corner in
+                    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+                    item.button?.target = self
+                    item.button?.action = #selector(clicked(_:))
+                    return (corner, item)
+                }.reversed()
+                redraw()
+            } else {
+                items.forEach { NSStatusBar.system.removeStatusItem($0.item) }
+                items = []
             }
         }
+    }
+
+    @objc private func redraw() {
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        for (corner, item) in items {
+            let inFront = corner.bundle == front
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .kern: 0.3 * font.pointSize,
+                // the menu bar's own ink, light or dark as it is
+                .foregroundColor: NSColor.labelColor.withAlphaComponent(inFront ? 1 : 0.55),
+            ]
+            if inFront { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+            item.button?.attributedTitle = NSAttributedString(string: corner.word, attributes: attributes)
+        }
+    }
+
+    @objc private func clicked(_ sender: NSStatusBarButton) {
+        guard let corner = items.first(where: { $0.item.button === sender })?.corner else { return }
+        open(corner)
     }
 }
 
@@ -1680,7 +1666,6 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let battery = BatteryView()
     private let wave = WaveView()
     private var windows: [DeskWindow] = []
-    private let bar = DeskWindow(view: AppBarView()) { l in l.bar }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         windows = corners.map { corner in
@@ -1735,7 +1720,6 @@ final class Desk: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .wallpaperChanged, object: nil, queue: .main) { [weak self] _ in
             guard let screen = NSScreen.screens.first else { return }
             self?.windows.forEach { $0.adaptInk(on: screen) }
-            if self?.bar.isVisible == true { self?.bar.adaptInk(on: screen) }
         }
         InkCursors.apply()
         // light ink at night: the cursors follow the appearance. The app's own appearance turns the
@@ -1765,7 +1749,6 @@ final class Desk: NSObject, NSApplicationDelegate {
         layout()
         // the ink turns with it (where there's no wallpaper to look at)
         windows.forEach { $0.redrawFading() }
-        bar.redrawFading()
         NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
     }
 
@@ -1783,14 +1766,9 @@ final class Desk: NSObject, NSApplicationDelegate {
         showBar()
     }
 
-    /// The bar of apps: only while the windows are in Full Screen.
+    /// The apps in the menu bar: only while the windows are in Full Screen.
     private func showBar() {
-        guard let screen = NSScreen.screens.first else { return }
-        if Tiler.shared.on && Tiler.shared.arrangement == .full {
-            bar.place(on: screen)
-        } else {
-            bar.orderOut(nil)
-        }
+        AppMenuBar.shared.shown = Tiler.shared.on && Tiler.shared.arrangement == .full
     }
 }
 
