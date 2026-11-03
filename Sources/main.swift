@@ -891,7 +891,9 @@ final class Tiler {
     /// the window grows toward a neighbour and shrinks away from it, wherever it stands. The border is the
     /// one on the right (below), or the left (above) when there is no neighbour on the right (below).
     func resize(_ direction: Direction) {
-        guard on, !arrangement.stacks, animation == nil, AXIsProcessTrusted(), let window = focusedWindow(),
+        // no waiting for a glide to end: the places are where the windows are going, and a new glide starts
+        // from wherever they are
+        guard on, !arrangement.stacks, AXIsProcessTrusted(), let window = focusedWindow(),
               let k = order.firstIndex(of: window), slots.count == order.count else { return }
         let step: CGFloat = direction == .right || direction == .up ? 80 : -80
         var first = slots[k], second = slots[k]
