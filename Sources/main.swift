@@ -887,20 +887,20 @@ final class Tiler {
         }
     }
 
-    /// ⌃⌥⌘ arrows: the focused window grows (→ wider, ↑ taller) or shrinks (← narrower, ↓ lower) by a step,
-    /// its neighbour giving way. The edge that moves is the right (the bottom) one, or, with no neighbour
-    /// there, the left (the top) one.
+    /// ⌃⌥⌘ arrows: the border between the focused window and its neighbour moves that way by a step, so
+    /// the window grows toward a neighbour and shrinks away from it, wherever it stands. The border is the
+    /// one on the right (below), or the left (above) when there is no neighbour on the right (below).
     func resize(_ direction: Direction) {
         guard on, !arrangement.stacks, animation == nil, AXIsProcessTrusted(), let window = focusedWindow(),
               let k = order.firstIndex(of: window), slots.count == order.count else { return }
         let step: CGFloat = direction == .right || direction == .up ? 80 : -80
         var first = slots[k], second = slots[k]
         if direction == .left || direction == .right {
-            first.size.width += step                            // the right edge
-            second.origin.x -= step; second.size.width += step  // the left edge
+            first.size.width += step                             // the right border
+            second.origin.x += step; second.size.width -= step   // the left border
         } else {
-            first.origin.y -= step; first.size.height += step   // the bottom edge
-            second.size.height += step                          // the top edge
+            first.origin.y += step; first.size.height -= step    // the border below
+            second.size.height += step                           // the border above
         }
         guard pull(k, to: first) || pull(k, to: second) else { return }
         retile()
