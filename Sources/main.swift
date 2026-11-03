@@ -493,7 +493,8 @@ enum CommandKeys {
 
 // ── tiling: the Re apps' windows share the middle of the desk ──
 // The windows keep an order, newest first; the arrangement decides where each one goes.
-// Changes glide; a window dragged onto another's place swaps with it, anything else snaps back.
+// Changes glide; a window dragged onto another's place swaps with it. Pulling a window's edge moves the
+// cut between it and its neighbour, which gives way as it goes; anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
 let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook"])
@@ -511,21 +512,32 @@ private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
 }
 
-/// `count` equal slices of `r` side by side, `tileGap` apart.
-func sideBySide(_ r: NSRect, _ count: Int) -> [NSRect] {
-    let width = (r.width - tileGap * CGFloat(count - 1)) / CGFloat(count)
-    return (0 ..< count).map { i in
-        NSRect(x: r.minX + CGFloat(i) * (width + tileGap), y: r.minY, width: width, height: r.height)
+/// `r` cut into pieces side by side (`across`) or one above another (the top one first), `tileGap` apart,
+/// each as big as its share of the room.
+func pieces(_ r: NSRect, across: Bool, _ shares: [CGFloat]) -> [NSRect] {
+    let total = shares.reduce(0, +)
+    let room = (across ? r.width : r.height) - tileGap * CGFloat(shares.count - 1)
+    var before: CGFloat = 0
+    return shares.enumerated().map { i, share in
+        // from the start (the left, or the top) to each piece's start and end
+        let start = room * before / total + CGFloat(i) * tileGap
+        before += share
+        let end = i == shares.count - 1 ? (across ? r.width : r.height) : room * before / total + CGFloat(i) * tileGap
+        return across ? NSRect(x: r.minX + start, y: r.minY, width: end - start, height: r.height)
+            : NSRect(x: r.minX, y: r.maxY - end, width: r.width, height: end - start)
     }
 }
 
-/// `count` equal slices of `r` one above another, the top one first.
-func stacked(_ r: NSRect, _ count: Int) -> [NSRect] {
-    let height = (r.height - tileGap * CGFloat(count - 1)) / CGFloat(count)
-    return (0 ..< count).map { i in
-        NSRect(x: r.minX, y: r.maxY - CGFloat(i + 1) * height - CGFloat(i) * tileGap, width: r.width, height: height)
-    }
+/// How an arrangement cuts the area: a window's place, or parts side by side (`across`) or one above
+/// another, each with its share. A part's path ("", "/0", "/1/2" …) names it, so a share the user
+/// gave it by resizing a window can be kept.
+indirect enum Cut {
+    case window(Int)
+    case parts(across: Bool, [Cut], shares: [CGFloat])
 }
+
+/// Shares the user gave, by a part's path.
+typealias Shares = [String: [CGFloat]]
 
 /// Where the windows go; the first window is the main one.
 enum Arrangement: String, CaseIterable {
@@ -547,48 +559,57 @@ enum Arrangement: String, CaseIterable {
     /// One at a Time and Full Screen: all the windows in one place, the focused one on top
     var stacks: Bool { self == .single || self == .full }
 
-    func frames(count: Int, in area: NSRect) -> [NSRect] {
-        guard count > 1 else { return count == 1 ? [area] : [] }
-        let rest = count - 1
+    func cut(count: Int) -> Cut {
+        let all = (0 ..< count).map(Cut.window)
+        func even(_ parts: [Cut], across: Bool) -> Cut {
+            parts.count == 1 ? parts[0] : .parts(across: across, parts, shares: Array(repeating: 1, count: parts.count))
+        }
+        guard count > 1, !stacks else { return .window(0) }
+        let rest = Array(all.dropFirst())
         switch self {
         case .main:
             // the main one on the left half, the others one above another on the right
-            let halves = sideBySide(area, 2)
-            return [halves[0]] + stacked(halves[1], rest)
+            return .parts(across: true, [all[0], even(rest, across: false)], shares: [1, 1])
         case .mainTop:
             // the main one across the top 60%, the others side by side under it
-            let mainHeight = (area.height - tileGap) * 0.6
-            let top = NSRect(x: area.minX, y: area.maxY - mainHeight, width: area.width, height: mainHeight)
-            let bottom = NSRect(x: area.minX, y: area.minY, width: area.width, height: area.height - mainHeight - tileGap)
-            return [top] + sideBySide(bottom, rest)
+            return .parts(across: false, [all[0], even(rest, across: true)], shares: [0.6, 0.4])
         case .centre:
-            // the main one in the middle half, the others shared out to the left and the right
-            guard count > 2 else { return sideBySide(area, 2) }
-            let side = (area.width - tileGap * 2) * 0.25
-            let left = NSRect(x: area.minX, y: area.minY, width: side, height: area.height)
-            let middle = NSRect(x: left.maxX + tileGap, y: area.minY, width: area.width - 2 * (side + tileGap), height: area.height)
-            let right = NSRect(x: middle.maxX + tileGap, y: area.minY, width: side, height: area.height)
-            let rightCount = rest / 2, leftCount = rest - rightCount
-            let l = stacked(left, leftCount), r = stacked(right, rightCount)
-            // alternating left and right, so a new window lands on the side with fewer
-            let sides: [NSRect] = (0 ..< rest).map { i in i % 2 == 0 ? l[i / 2] : r[i / 2] }
-            return [middle] + sides
+            // the main one in the middle half, the others shared out to the left and the right,
+            // alternating, so a new window lands on the side with fewer
+            guard count > 2 else { return even(all, across: true) }
+            let left = rest.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+            let right = rest.enumerated().filter { $0.offset % 2 == 1 }.map(\.element)
+            return .parts(across: true, [even(left, across: false), all[0], even(right, across: false)], shares: [1, 2, 1])
         case .columns:
-            return sideBySide(area, count)
+            return even(all, across: true)
         case .rows:
-            return stacked(area, count)
+            return even(all, across: false)
         case .grid:
             // as square as it gets; a short last row is spread across the width
             let across = Int(Double(count).squareRoot().rounded(.up))
-            let down = (count + across - 1) / across
-            return stacked(area, down).enumerated().flatMap { row, strip in
-                sideBySide(strip, min(across, count - row * across))
-            }
+            let rows = stride(from: 0, to: count, by: across).map { even(Array(all[$0 ..< min($0 + across, count)]), across: true) }
+            return even(rows, across: false)
         case .single, .full:
-            // every window fills the area (Full Screen's is the whole screen under the menu bar, which then
-            // shows the apps: AppMenuBar); the focused one is on top
-            return Array(repeating: area, count: count)
+            return .window(0)
         }
+    }
+
+    /// Every window's place. One at a Time and Full Screen: every window fills the area (Full Screen's is the
+    /// whole screen under the menu bar, which then shows the apps: AppMenuBar); the focused one is on top.
+    func frames(count: Int, in area: NSRect, shares: Shares = [:]) -> [NSRect] {
+        guard count > 0 else { return [] }
+        if stacks { return Array(repeating: area, count: count) }
+        var out = Array(repeating: area, count: count)
+        func lay(_ cut: Cut, _ r: NSRect, _ path: String) {
+            switch cut {
+            case .window(let i): out[i] = r
+            case .parts(let across, let parts, let given):
+                let rects = pieces(r, across: across, shares[path].flatMap { $0.count == given.count ? $0 : nil } ?? given)
+                for i in parts.indices { lay(parts[i], rects[i], path + "/\(i)") }
+            }
+        }
+        lay(cut(count: count), area, "")
+        return out
     }
 }
 
@@ -688,6 +709,13 @@ final class Tiler {
     private var ticks = 0
     private var pressed = false
     private var dragged: Int?
+    /// the window being resized with the mouse
+    private var resizing: Int?
+    /// the shares the user gave the parts by resizing, per arrangement and number of windows
+    private var shares: [String: Shares] = [:]
+    private var sharesKey: String { "\(arrangement.rawValue) \(order.count)" }
+    /// a part never gets smaller than this
+    private let smallest: CGFloat = 240
     private let overlay = DropOverlay()
 
     private struct Move { let window: TiledWindow; let from: NSRect; let to: NSRect }
@@ -769,19 +797,32 @@ final class Tiler {
             }
     }
 
-    /// The window whose top left left its place, if any.
+    /// The window whose top left left its place, keeping its size, if any.
     private func movedWindow() -> (index: Int, frame: NSRect)? {
         for (i, window) in order.enumerated() {
             guard let now = frame(of: window.element), let was = settled[window] else { continue }
-            if abs(now.minX - was.minX) > 4 || abs(now.maxY - was.maxY) > 4 { return (i, now) }
+            if (abs(now.minX - was.minX) > 4 || abs(now.maxY - was.maxY) > 4)
+                && abs(now.width - was.width) <= 2 && abs(now.height - was.height) <= 2 { return (i, now) }
         }
         return nil
     }
 
-    /// While the mouse is down: show where a dragged window would go.
+    /// The window whose size changed, if any.
+    private func resizedWindow() -> Int? {
+        order.firstIndex { window in
+            guard let now = frame(of: window.element), let was = settled[window] else { return false }
+            return abs(now.width - was.width) > 2 || abs(now.height - was.height) > 2
+        }
+    }
+
+    /// While the mouse is down: show where a dragged window would go, or let the others give way
+    /// to one being resized.
     private func dragging() {
         guard animation == nil, order.count > 1, !arrangement.stacks else { return }
-        if dragged == nil { dragged = movedWindow()?.index }
+        if dragged == nil && resizing == nil {
+            if let k = resizedWindow() { resizing = k } else { dragged = movedWindow()?.index }
+        }
+        if let resizing { return follow(resizing) }
         guard let dragged else { return }
         let point = NSEvent.mouseLocation
         if let target = slots.firstIndex(where: { $0.contains(point) }), target != dragged {
@@ -796,6 +837,7 @@ final class Tiler {
     private func released(at point: NSPoint?) {
         overlay.hide()
         dragged = nil
+        resizing = nil
         guard on, animation == nil else { return }
         if let moved = movedWindow() {
             let drop = point ?? NSPoint(x: moved.frame.midX, y: moved.frame.midY)
@@ -812,10 +854,75 @@ final class Tiler {
         if resized { retile() }
     }
 
-    func retile() {
-        guard on, AXIsProcessTrusted(), let screen = NSScreen.screens.first else { return }
+    /// Where the windows share: the desk's middle, or the whole screen in Full Screen.
+    private func tilingArea() -> NSRect? {
+        guard let screen = NSScreen.screens.first else { return nil }
         let layout = Layout(area: screen.visibleFrame)
-        slots = arrangement.frames(count: order.count, in: arrangement == .full ? layout.area : layout.tiles).map(\.integral)
+        return arrangement == .full ? layout.area : layout.tiles
+    }
+
+    private func places() -> [NSRect] {
+        guard let area = tilingArea() else { return [] }
+        return arrangement.frames(count: order.count, in: area, shares: shares[sharesKey] ?? [:]).map(\.integral)
+    }
+
+    /// A window being resized: each edge it pulled moves the cut between its part and the neighbouring one
+    /// (the nearest cut that way), and the other windows follow at once.
+    private func follow(_ k: Int) {
+        guard k < order.count, slots.count == order.count, let now = frame(of: order[k].element),
+              let area = tilingArea() else { return }
+        let slot = slots[k]
+        var mine = shares[sharesKey] ?? [:]
+        // the cuts around this window, the nearest first: its part's place among the others
+        var around: [(path: String, across: Bool, rects: [NSRect], at: Int)] = []
+        func find(_ cut: Cut, _ r: NSRect, _ path: String) -> Bool {
+            switch cut {
+            case .window(let i): return i == k
+            case .parts(let across, let parts, let given):
+                let rects = pieces(r, across: across, mine[path].flatMap { $0.count == given.count ? $0 : nil } ?? given)
+                for i in parts.indices where find(parts[i], rects[i], path + "/\(i)") {
+                    around.append((path, across, rects, i))
+                    return true
+                }
+                return false
+            }
+        }
+        _ = find(arrangement.cut(count: order.count), area, "")
+        // left, right, top, bottom: whether the edge runs across, whether the neighbour comes after, and the
+        // part's new size for the edge where the window now has it
+        let edges: [(across: Bool, after: Bool, pulled: CGFloat, size: (NSRect) -> CGFloat)] = [
+            (true, false, now.minX - slot.minX, { $0.maxX - now.minX }),
+            (true, true, now.maxX - slot.maxX, { now.maxX - $0.minX }),
+            (false, false, now.maxY - slot.maxY, { now.maxY - $0.minY }),
+            (false, true, now.minY - slot.minY, { $0.maxY - now.minY }),
+        ]
+        var changed = false
+        for edge in edges where abs(edge.pulled) > 1 {
+            guard let cut = around.first(where: { $0.across == edge.across && (edge.after ? $0.at < $0.rects.count - 1 : $0.at > 0) })
+            else { continue }
+            let length: (NSRect) -> CGFloat = { edge.across ? $0.width : $0.height }
+            var sizes = cut.rects.map(length)
+            let j = edge.after ? cut.at + 1 : cut.at - 1
+            let both = sizes[cut.at] + sizes[j]
+            guard both >= smallest * 2 else { continue }
+            sizes[cut.at] = min(max(edge.size(cut.rects[cut.at]), smallest), both - smallest)
+            sizes[j] = both - sizes[cut.at]
+            mine[cut.path] = sizes
+            changed = true
+        }
+        guard changed else { return }
+        shares[sharesKey] = mine
+        let was = slots
+        slots = places()
+        for (i, window) in order.enumerated() where i != k && slots[i] != was[i] {
+            setFrame(of: window.element, to: slots[i], exact: true)
+            settled[window] = frame(of: window.element) ?? slots[i]
+        }
+    }
+
+    func retile() {
+        guard on, AXIsProcessTrusted() else { return }
+        slots = places()
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
@@ -935,7 +1042,9 @@ final class Tiler {
     }
 
     /// ⌘1…⌘8 (in the Re apps): this arrangement, with tiling on.
+    /// Choosing the arrangement already in use evens out what resizing changed.
     func choose(_ arrangement: Arrangement) {
+        if on && arrangement == self.arrangement { shares[sharesKey] = nil }
         self.arrangement = arrangement
         on = true
     }
