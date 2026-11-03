@@ -37,24 +37,14 @@ let letterSize: CGFloat = 20
 let letterStep: CGFloat = 32
 let columnWidth: CGFloat = 42
 
-/// The desk's ink: white in a dark appearance, a near black in a light one, as see-through either way.
-/// Resolved at each drawing by the Mac's appearance, whatever the wallpaper behind.
-func ink(_ alpha: CGFloat) -> NSColor {
-    NSColor(name: nil) { appearance in
-        let night = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return (night ? NSColor.white : NSColor(white: 0.08, alpha: 1)).withAlphaComponent(alpha)
-    }
-}
+/// The desk's ink: always white, as in the dark, see-through by `alpha`, whatever the Mac or the wallpaper.
+func ink(_ alpha: CGFloat) -> NSColor { NSColor.white.withAlphaComponent(alpha) }
 
 /// Gauges: the empty part at 25%, the filled part (and the chosen wallpaper) at 50%.
 let faint = ink(0.25)
 let strong = ink(0.5)
-/// the day's "now": a soft grey-green, darker by day
-let nowInk = NSColor(name: nil) { appearance in
-    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        ? NSColor(srgbRed: 0xAD / 255, green: 0xB5 / 255, blue: 0xB4 / 255, alpha: 1)
-        : NSColor(srgbRed: 0x4F / 255, green: 0x57 / 255, blue: 0x56 / 255, alpha: 1)
-}
+/// the day's "now": a soft grey-green
+let nowInk = NSColor(srgbRed: 0xAD / 255, green: 0xB5 / 255, blue: 0xB4 / 255, alpha: 1)
 let barWidth: CGFloat = 4
 
 /// The apps' side-button font, shipped inside ReDesk; the system font if it can't be loaded.
