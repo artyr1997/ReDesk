@@ -401,6 +401,10 @@ enum HotKeys {
     private static let keys: [(id: UInt32, key: Int)] = [
         (1, kVK_UpArrow), (2, kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space), (6, kVK_LeftArrow), (7, kVK_RightArrow),
     ]
+    /// with ⌘ as well
+    private static let commanded: [(id: UInt32, key: Int)] = [
+        (41, kVK_UpArrow), (42, kVK_DownArrow), (43, kVK_LeftArrow), (44, kVK_RightArrow),
+    ]
     /// with ⇧ as well
     private static let shifted: [(id: UInt32, key: Int)] = [
         (21, kVK_UpArrow), (22, kVK_DownArrow), (23, kVK_LeftArrow), (24, kVK_RightArrow),
@@ -424,6 +428,10 @@ enum HotKeys {
             case 22: Tiler.shared.move(.down)
             case 23: Tiler.shared.move(.left)
             case 24: Tiler.shared.move(.right)
+            case 41: Tiler.shared.resize(.up)
+            case 42: Tiler.shared.resize(.down)
+            case 43: Tiler.shared.resize(.left)
+            case 44: Tiler.shared.resize(.right)
             case 31: Appearance.toggle()
             default: break
             }
@@ -431,6 +439,7 @@ enum HotKeys {
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
         let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
+            + commanded.map { ($0.id, $0.key, modifiers | UInt32(cmdKey)) }
             + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey))]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
@@ -866,11 +875,39 @@ final class Tiler {
         return arrangement.frames(count: order.count, in: area, shares: shares[sharesKey] ?? [:]).map(\.integral)
     }
 
-    /// A window being resized: each edge it pulled moves the cut between its part and the neighbouring one
-    /// (the nearest cut that way), and the other windows follow at once.
+    /// A window being resized: the others follow at once.
     private func follow(_ k: Int) {
-        guard k < order.count, slots.count == order.count, let now = frame(of: order[k].element),
-              let area = tilingArea() else { return }
+        guard k < order.count, slots.count == order.count, let now = frame(of: order[k].element), pull(k, to: now)
+        else { return }
+        let was = slots
+        slots = places()
+        for (i, window) in order.enumerated() where i != k && slots[i] != was[i] {
+            setFrame(of: window.element, to: slots[i], exact: true)
+            settled[window] = frame(of: window.element) ?? slots[i]
+        }
+    }
+
+    /// ⌃⌥⌘ arrows: the focused window's edge that way moves out by a step, its neighbour giving way;
+    /// with no neighbour that way, its other edge comes in, so the window and the cut go that way.
+    func resize(_ direction: Direction) {
+        guard on, !arrangement.stacks, animation == nil, AXIsProcessTrusted(), let window = focusedWindow(),
+              let k = order.firstIndex(of: window), slots.count == order.count else { return }
+        let step: CGFloat = 80
+        var out = slots[k], back = slots[k]
+        switch direction {
+        case .right: out.size.width += step; back.origin.x += step; back.size.width -= step
+        case .left: out.origin.x -= step; out.size.width += step; back.size.width -= step
+        case .up: out.size.height += step; back.size.height -= step
+        case .down: out.origin.y -= step; out.size.height += step; back.origin.y += step; back.size.height -= step
+        }
+        guard pull(k, to: out) || pull(k, to: back) else { return }
+        retile()
+    }
+
+    /// Each edge of window `k` that is no longer where its place has it moves the cut between its part and
+    /// the neighbouring one (the nearest cut that way), to where the edge now is. Whether anything changed.
+    private func pull(_ k: Int, to now: NSRect) -> Bool {
+        guard k < order.count, slots.count == order.count, let area = tilingArea() else { return false }
         let slot = slots[k]
         var mine = shares[sharesKey] ?? [:]
         // the cuts around this window, the nearest first: its part's place among the others
@@ -905,19 +942,15 @@ final class Tiler {
             let j = edge.after ? cut.at + 1 : cut.at - 1
             let both = sizes[cut.at] + sizes[j]
             guard both >= smallest * 2 else { continue }
-            sizes[cut.at] = min(max(edge.size(cut.rects[cut.at]), smallest), both - smallest)
-            sizes[j] = both - sizes[cut.at]
+            let size = min(max(edge.size(cut.rects[cut.at]), smallest), both - smallest)
+            guard abs(size - sizes[cut.at]) > 0.5 else { continue }
+            sizes[cut.at] = size
+            sizes[j] = both - size
             mine[cut.path] = sizes
             changed = true
         }
-        guard changed else { return }
-        shares[sharesKey] = mine
-        let was = slots
-        slots = places()
-        for (i, window) in order.enumerated() where i != k && slots[i] != was[i] {
-            setFrame(of: window.element, to: slots[i], exact: true)
-            settled[window] = frame(of: window.element) ?? slots[i]
-        }
+        if changed { shares[sharesKey] = mine }
+        return changed
     }
 
     func retile() {
