@@ -1308,9 +1308,13 @@ final class WordView: DeskView {
     init(corner: Corner) {
         self.corner = corner
         super.init(frame: .zero)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(frontChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
     }
 
     required init?(coder: NSCoder) { nil }
+
+    @objc private func frontChanged() { needsDisplay = true }
 
     override func updateTrackingAreas() {
         trackingAreas.forEach(removeTrackingArea)
@@ -1329,10 +1333,12 @@ final class WordView: DeskView {
 
     @objc private func openApp() { open(corner) }
 
+    /// The app in front (or the word under the mouse) in full ink, the others at half.
     override func draw(_ dirtyRect: NSRect) {
+        let inFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == corner.bundle
         let attributes: [NSAttributedString.Key: Any] = [
             .font: letterFont,
-            .foregroundColor: ink(hovered ? 0.95 : 0.5),
+            .foregroundColor: ink(hovered || inFront ? 0.95 : 0.5),
         ]
         for (i, letter) in corner.word.enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
