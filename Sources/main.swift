@@ -887,20 +887,22 @@ final class Tiler {
         }
     }
 
-    /// ⌃⌥⌘ arrows: the focused window's edge that way moves out by a step, its neighbour giving way;
-    /// with no neighbour that way, its other edge comes in, so the window and the cut go that way.
+    /// ⌃⌥⌘ arrows: the focused window grows (→ wider, ↑ taller) or shrinks (← narrower, ↓ lower) by a step,
+    /// its neighbour giving way. The edge that moves is the right (the bottom) one, or, with no neighbour
+    /// there, the left (the top) one.
     func resize(_ direction: Direction) {
         guard on, !arrangement.stacks, animation == nil, AXIsProcessTrusted(), let window = focusedWindow(),
               let k = order.firstIndex(of: window), slots.count == order.count else { return }
-        let step: CGFloat = 80
-        var out = slots[k], back = slots[k]
-        switch direction {
-        case .right: out.size.width += step; back.origin.x += step; back.size.width -= step
-        case .left: out.origin.x -= step; out.size.width += step; back.size.width -= step
-        case .up: out.size.height += step; back.size.height -= step
-        case .down: out.origin.y -= step; out.size.height += step; back.origin.y += step; back.size.height -= step
+        let step: CGFloat = direction == .right || direction == .up ? 80 : -80
+        var first = slots[k], second = slots[k]
+        if direction == .left || direction == .right {
+            first.size.width += step                            // the right edge
+            second.origin.x -= step; second.size.width += step  // the left edge
+        } else {
+            first.origin.y -= step; first.size.height += step   // the bottom edge
+            second.size.height += step                          // the top edge
         }
-        guard pull(k, to: out) || pull(k, to: back) else { return }
+        guard pull(k, to: first) || pull(k, to: second) else { return }
         retile()
     }
 
