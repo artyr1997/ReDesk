@@ -203,9 +203,17 @@ enum Wallpapers {
 }
 
 /// A video wallpaper: a muted, looping video in a window under the desktop icons, on every screen.
-/// It pauses while the displays sleep.
+/// It pauses while the displays sleep, and stands still while frozen (⌘⇧M), kept between launches.
 final class LiveWallpaper {
     static let shared = LiveWallpaper()
+
+    /// ⌘⇧M: the video stands still (no decoding, so no work for the Mac) or moves again.
+    var frozen = UserDefaults.standard.bool(forKey: "wallpaperFrozen") {
+        didSet {
+            UserDefaults.standard.set(frozen, forKey: "wallpaperFrozen")
+            if frozen { player?.pause() } else { player?.play() }
+        }
+    }
 
     private var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
@@ -222,7 +230,7 @@ final class LiveWallpaper {
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         self.player = player
         layout()
-        player.play()
+        if !frozen { player.play() }
     }
 
     func stop() {
@@ -262,7 +270,7 @@ final class LiveWallpaper {
     }
 
     func pause() { player?.pause() }
-    func resume() { player?.play() }
+    func resume() { if !frozen { player?.play() } }
 
     func layout() {
         windows.forEach { $0.orderOut(nil) }
@@ -420,6 +428,7 @@ enum HotKeys {
             case 43: Tiler.shared.resize(.left)
             case 44: Tiler.shared.resize(.right)
             case 31: Appearance.toggle()
+            case 32: LiveWallpaper.shared.frozen.toggle()
             default: break
             }
             return noErr
@@ -427,7 +436,7 @@ enum HotKeys {
         let modifiers = UInt32(controlKey | optionKey)
         let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
             + commanded.map { ($0.id, $0.key, modifiers | UInt32(cmdKey)) }
-            + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey))]
+            + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey))]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),

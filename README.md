@@ -33,6 +33,7 @@ Around them:
 | ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |
 | ⌘⇧↑ / ⌘⇧↓ | in the Re apps | previous / next wallpaper |
 | ⌘⇧T | anywhere | the Mac between light and dark (through System Events: macOS asks once) |
+| ⌘⇧M | anywhere | a video wallpaper stands still, or moves again (kept between launches) |
 
 The ⌘ keys are taken only while a Re app is in front, so they keep their usual meaning everywhere else (and lose it inside the Re apps: ⌘↑ / ⌘↓ no longer jump to the top / bottom of a text there). They are read with an event tap, which needs the same Accessibility permission as tiling.
 
