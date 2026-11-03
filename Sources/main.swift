@@ -43,8 +43,6 @@ func ink(_ alpha: CGFloat) -> NSColor { NSColor.white.withAlphaComponent(alpha) 
 /// Gauges: the empty part at 25%, the filled part (and the chosen wallpaper) at 50%.
 let faint = ink(0.25)
 let strong = ink(0.5)
-/// the day's "now": a soft grey-green
-let nowInk = NSColor(srgbRed: 0xAD / 255, green: 0xB5 / 255, blue: 0xB4 / 255, alpha: 1)
 let barWidth: CGFloat = 4
 
 /// The apps' side-button font, shipped inside ReDesk; the system font if it can't be loaded.
@@ -1520,7 +1518,7 @@ final class WallpaperView: DeskView {
 
 let diamondSize: CGFloat = 13
 
-/// The mark for "this one" (the strong ink) or "now" (solid grey-green).
+/// The mark for "this one" or "now", in the strong ink (as the day's noon line).
 func drawDiamond(at c: NSPoint, color: NSColor = strong) {
     let r = diamondSize / 2
     let path = NSBezierPath()
@@ -1559,7 +1557,7 @@ final class DayView: DeskView {
         NSRect(x: bounds.midX - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
         // kept inside the window so it is never cut at midnight's ends
         let r = diamondSize / 2
-        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY), color: nowInk)
+        drawDiamond(at: NSPoint(x: r + (bounds.width - diamondSize) * CGFloat(gone), y: bounds.midY))
     }
 
     override func menuItems() -> [NSMenuItem] {
