@@ -710,6 +710,9 @@ final class Tiler {
 
     /// the windows, main first; `slots[i]` is where `order[i]` belongs
     private var order: [TiledWindow] = []
+    /// every window still alive in its turn, also those out of sight for now (on another desktop, its app
+    /// hidden), so one coming back takes its old place instead of the newest one's
+    private var known: [TiledWindow] = []
     private var slots: [NSRect] = []
     /// where each window really ended up (a window may keep a size of its own), to tell when it is moved
     private var settled: [TiledWindow: NSRect] = [:]
@@ -780,14 +783,33 @@ final class Tiler {
     private func look() {
         guard animation == nil else { return }
         let open = openWindows()
-        let kept = order.filter(open.contains)
-        let added = open.filter { !kept.contains($0) }
-        if added.count > 0 || kept.count != order.count {
-            order = added + kept
+        known = known.filter { open.contains($0) || alive($0) }
+        known = open.filter { !known.contains($0) } + known
+        let now = known.filter(open.contains)
+        if now != order {
+            order = now
             retile()
         } else {
             // moved without the mouse (the keyboard, the app itself): back to its place
             released(at: nil)
+        }
+    }
+
+    /// Whether a window out of sight still exists (a closed one, or one whose app quit, doesn't).
+    private func alive(_ window: TiledWindow) -> Bool {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(window.element, kAXRoleAttribute as CFString, &value)
+        return error != .invalidUIElement && error != .cannotComplete
+    }
+
+    /// Keeps the turn of the windows in sight (after a swap, a move, a new main one) in `known`,
+    /// those out of sight staying where they were.
+    private func remember() {
+        let spots = known.indices.filter { order.contains(known[$0]) }
+        if spots.count == order.count {
+            for (spot, window) in zip(spots, order) { known[spot] = window }
+        } else {
+            known = order + known.filter { !order.contains($0) }
         }
     }
 
@@ -959,6 +981,7 @@ final class Tiler {
 
     func retile() {
         guard on, AXIsProcessTrusted() else { return }
+        remember()
         slots = places()
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
