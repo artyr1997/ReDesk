@@ -163,7 +163,10 @@ enum Wallpapers {
         // what is on the desktop now stays over the new wallpaper a moment, then fades away
         let old = LiveWallpaper.shared.url != nil ? LiveWallpaper.shared.handOver() : (windows: Crossfade.cover(), video: [])
         defer { Crossfade.lift(old.windows, keeping: old.video, over: duration) }
-        if isVideo(url) {
+        if url.pathExtension == "youtube" {
+            // no picture of it ever: the wallpaper before stays until the stream moves over it
+            LiveWallpaper.shared.play(url)
+        } else if isVideo(url) {
             LiveWallpaper.shared.play(url)
             let still = still(of: url)
             if FileManager.default.fileExists(atPath: still.path) {
@@ -255,7 +258,7 @@ final class LiveWallpaper {
         player.preventsDisplaySleepDuringVideoPlayback = false
         self.player = player
         if url.pathExtension == "youtube" {
-            // its still shows at once; the stream comes over it when YouTube has said where it is
+            // no picture of it: the wallpaper before stays until YouTube has said where the stream is and it moves
             layout()
             stream(url, into: player)
             return
@@ -369,7 +372,7 @@ final class LiveWallpaper {
             let view = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
             let base = CALayer()
             base.frame = view.bounds
-            if let url, let still = Crossfade.picture(Wallpapers.still(of: url), for: screen) {
+            if let url, url.pathExtension != "youtube", let still = Crossfade.picture(Wallpapers.still(of: url), for: screen) {
                 base.contents = still
                 base.contentsGravity = .resizeAspectFill
                 base.masksToBounds = true
@@ -441,7 +444,9 @@ enum Crossfade {
     static func lift(_ windows: [NSWindow], keeping video: [AnyObject] = [], over duration: Double = duration, waited: Double = 0) {
         guard !windows.isEmpty else { return }
         let shown = LiveWallpaper.shared.url == nil ? waited >= 0.2 : (LiveWallpaper.shared.stillShown || LiveWallpaper.shared.ready)
-        if waited < 1.5 && !shown {
+        // a YouTube stream has no still: the old wallpaper waits for it (YouTube takes some seconds to answer)
+        let youtube = LiveWallpaper.shared.url?.pathExtension == "youtube"
+        if waited < (youtube ? 30 : 1.5) && !shown {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 lift(windows, keeping: video, over: duration, waited: waited + 0.05)
             }
@@ -1931,7 +1936,7 @@ final class DeskWindow: NSWindow {
 
 // ── wallpapers from YouTube ──
 // A link pasted in (the right-click menu's Wallpaper from YouTube…) is kept, not the video: a .youtube file
-// with the link in Application Support/ReDesk/YouTube, and the video's picture as its still. Shown, yt-dlp
+// with the link in Application Support/ReDesk/YouTube (no picture of the video: the wallpaper before stays until the stream moves). Shown, yt-dlp
 // asks YouTube where the stream is: the picture alone (no sound), the best there is up to 4K, and the video
 // plays from there, a live one as it goes. yt-dlp comes from Homebrew (brew install yt-dlp).
 
@@ -2018,26 +2023,20 @@ enum YouTubeWallpaper {
         }
     }
 
-    /// Keeps the link (and the video's picture as its still) and puts it on the desk.
+    /// Keeps the link (only the link: no picture of the video) and puts it on the desk.
     static func add(_ link: String) {
         guard progress == nil else { return }
         guard let ytdlp = tool("yt-dlp") else { return fail("It takes yt-dlp: brew install yt-dlp") }
         progress = "looking"
         DispatchQueue.global(qos: .userInitiated).async {
             let info = run(ytdlp, ["--skip-download", "--no-playlist", "--print", "%(title).80B [%(id)s]",
-                                   "--print", "thumbnail", "--print", "webpage_url", link])
+                                   "--print", "webpage_url", link])
             let lines = info.output.split(separator: "\n").map(String.init)
-            guard info.status == 0, lines.count >= 3 else { return fail("YouTube didn't give the video.") }
+            guard info.status == 0, lines.count >= 2 else { return fail("YouTube didn't give the video.") }
             let name = lines[0].replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
             let file = Wallpapers.youtubeFolder.appendingPathComponent(name + ".youtube")
-            guard (try? lines[2].write(to: file, atomically: true, encoding: .utf8)) != nil else {
+            guard (try? lines[1].write(to: file, atomically: true, encoding: .utf8)) != nil else {
                 return fail("It couldn't be kept.")
-            }
-            // the still under the video (and the desktop's picture when ReDesk isn't there)
-            if let url = URL(string: lines[1]), let data = try? Data(contentsOf: url), let image = NSImage(data: data),
-               let tiff = image.tiffRepresentation, let jpeg = NSBitmapImageRep(data: tiff)?
-                   .representation(using: .jpeg, properties: [.compressionFactor: 0.9]) {
-                try? jpeg.write(to: Wallpapers.still(of: file))
             }
             DispatchQueue.main.async {
                 progress = nil
@@ -2047,7 +2046,7 @@ enum YouTubeWallpaper {
         }
     }
 
-    /// The YouTube wallpaper on the desk goes (its link and its still), and the desk takes the one before it.
+    /// The YouTube wallpaper on the desk goes (its link), and the desk takes the one before it.
     static func removeCurrent() {
         guard let index = Wallpapers.current else { return }
         let url = Wallpapers.all[index]
