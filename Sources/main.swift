@@ -17,6 +17,8 @@ import ImageIO
 import IOKit.ps
 import IOKit.pwr_mgt
 import LocalAuthentication
+import LocalAuthenticationEmbeddedUI
+import OpenDirectory
 import ServiceManagement
 
 struct Corner {
@@ -1869,12 +1871,39 @@ final class LockWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+/// The Mac's password, typed on the lock screen itself: no system prompt.
+final class PasswordField: NSSecureTextField {
+    var submit: (String) -> Void = { _ in }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        // a light caret on the dark
+        (currentEditor() as? NSTextView)?.insertionPointColor = ink(0.95)
+        return became
+    }
+
+    override func cancelOperation(_ sender: Any?) { stringValue = "" }
+}
+
 final class LockFace: NSView {
-    var unlock: () -> Void = {}
-    /// the screen with the calendar and UNLOCK (the others only show the wallpaper)
+    /// the screen with the calendar and the password (the others only show the wallpaper)
     let main: Bool
-    var asking = false { didSet { needsDisplay = true } }
+    /// over the password: what to do, or that it was wrong
+    var status = "TOUCH ID OR PASSWORD" { didSet { needsDisplay = true } }
     private var field: BirthdayField?
+    let password = PasswordField(frame: .zero)
+    /// Touch ID's mark (LAAuthenticationView), in place of the system's prompt
+    var touch: NSView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            guard let touch else { return }
+            touch.frame = NSRect(x: bounds.midX - 14, y: passwordLine + 40, width: 28, height: 28)
+            addSubview(touch)
+        }
+    }
+
+    /// where the password is typed: where UNLOCK was
+    var passwordLine: CGFloat { bounds.minY + bounds.height * 0.0625 }
 
     /// a life of 90 years, a column each, 52 weeks down
     static let years = 90, weeks = 52
@@ -1882,6 +1911,32 @@ final class LockFace: NSView {
     init(frame: NSRect, main: Bool) {
         self.main = main
         super.init(frame: frame)
+        guard main else { return }
+        password.isBezeled = false
+        password.isBordered = false
+        password.drawsBackground = false
+        password.focusRingType = .none
+        password.alignment = .center
+        password.font = lockLetters
+        password.textColor = ink(0.95)
+        password.placeholderAttributedString = NSAttributedString(string: "PASSWORD", attributes: [
+            .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.3),
+        ])
+        password.target = self
+        password.action = #selector(entered)
+        password.frame = NSRect(x: bounds.midX - 150, y: passwordLine - 4, width: 300, height: 24)
+        addSubview(password)
+    }
+
+    @objc private func entered() {
+        guard !password.stringValue.isEmpty else { return }
+        password.submit(password.stringValue)
+    }
+
+    /// back to the password, wherever the click or the key was
+    func focusPassword() {
+        guard main, field == nil else { return }
+        window?.makeFirstResponder(password)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1895,14 +1950,14 @@ final class LockFace: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard main else { return unlock() }
+        guard main else { return }
         let point = convert(event.locationInWindow, from: nil)
         if field != nil { return closeBirthday() }
         if hypot(point.x - corner.x, point.y - corner.y) < 18 { return openBirthday() }
-        unlock()
+        focusPassword()
     }
-    override func rightMouseDown(with event: NSEvent) { if field == nil { unlock() } }
-    override func keyDown(with event: NSEvent) { unlock() }
+    override func rightMouseDown(with event: NSEvent) {}
+    override func keyDown(with event: NSEvent) { focusPassword() }
 
     private func openBirthday() {
         let field = BirthdayField(frame: .zero)
@@ -1938,19 +1993,19 @@ final class LockFace: NSView {
         birthday = field.dateValue
         field.removeFromSuperview()
         self.field = nil
-        window?.makeFirstResponder(self)
         needsDisplay = true
+        focusPassword()
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
         drawLife()
         drawDiamond(at: corner, color: field != nil ? ink(0.95) : strong)
-        let hint = NSAttributedString(string: asking ? "TOUCH ID OR PASSWORD" : "UNLOCK", attributes: [
+        let hint = NSAttributedString(string: status, attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let h = hint.size()
-        hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
+        hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: passwordLine + 22))
     }
 
     /// Every week of a life of 90 years, lying on its side: a column a year (left to right, a wider gap
@@ -2008,8 +2063,9 @@ final class LockScreen {
     private var faces: [LockFace] = []
     private var shownAt: Date?
     private var before: NSRunningApplication?
-    private var asking = false
     private var systemLocked = false
+    /// the Touch ID being waited for
+    private var context: LAContext?
 
     var shown: Bool { !windows.isEmpty }
 
@@ -2037,7 +2093,7 @@ final class LockScreen {
 
     private func check() {
         if shown {
-            if !systemLocked, !asking, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
+            if !systemLocked, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
                 lockTheMac()
             }
             return
@@ -2110,7 +2166,7 @@ final class LockScreen {
             container.addSubview(veil)
 
             let face = LockFace(frame: bounds, main: screen == mainScreen)
-            face.unlock = { [weak self] in self?.unlock() }
+            face.password.submit = { [weak self] typed in self?.check(password: typed) }
             container.addSubview(face)
             faces.append(face)
 
@@ -2126,8 +2182,9 @@ final class LockScreen {
                                      .disableSessionTermination, .disableHideApplication, .disableAppleMenu]
         if let main = windows.first {
             main.makeKeyAndOrderFront(nil)
-            main.makeFirstResponder(main.contentView?.subviews.last)
         }
+        faces.first { $0.main }?.focusPassword()
+        waitForTouch()
         NSCursor.setHiddenUntilMouseMoves(true)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Crossfade.themeDuration
@@ -2135,35 +2192,58 @@ final class LockScreen {
         }
     }
 
-    /// Touch ID, or the Mac's password; the screen steps down under the system's prompt meanwhile.
-    private func unlock() {
-        guard shown, !asking else { return }
+    private var face: LockFace? { faces.first { $0.main } }
+
+    /// Touch ID, its mark on the lock screen in place of the system's prompt (LAAuthenticationView):
+    /// a finger on the key unlocks. Tried again after a miss, until Touch ID locks itself (then the password).
+    private func waitForTouch() {
+        guard shown, let face else { return }
         let context = LAContext()
         var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            // nothing to ask with (no password on the Mac): it just opens
-            return hide()
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            face.status = "PASSWORD"
+            return
         }
-        asking = true
-        faces.forEach { $0.asking = true }
-        windows.forEach { $0.level = .floating }
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "unlock the desk") { ok, _ in
+        self.context = context
+        face.touch = LAAuthenticationView(context: context, controlSize: .regular)
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "unlock the desk") { ok, error in
             DispatchQueue.main.async {
-                self.asking = false
-                self.faces.forEach { $0.asking = false }
-                if ok {
-                    self.hide()
-                } else {
-                    self.windows.forEach { $0.level = .screenSaver }
-                    NSApp.activate(ignoringOtherApps: true)
-                    self.windows.first?.makeKeyAndOrderFront(nil)
+                guard self.shown, self.context === context else { return }
+                if ok { return self.hide() }
+                let code = (error as? LAError)?.code
+                if code == .biometryLockout || code == .biometryNotAvailable || code == .biometryNotEnrolled {
+                    self.face?.touch = nil
+                    self.face?.status = "PASSWORD"
+                    return
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitForTouch() }
+            }
+        }
+    }
+
+    /// The Mac's password, checked by Open Directory (as the login window does), off the main thread.
+    private func check(password typed: String) {
+        let user = NSUserName()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let right: Bool = {
+                guard let node = try? ODNode(session: ODSession.default(), type: ODNodeType(kODNodeTypeAuthentication)),
+                      let record = try? node.record(withRecordType: kODRecordTypeUsers, name: user, attributes: nil)
+                else { return false }
+                return (try? record.verifyPassword(typed)) != nil
+            }()
+            DispatchQueue.main.async {
+                guard self.shown else { return }
+                if right { return self.hide() }
+                self.face?.password.stringValue = ""
+                self.face?.status = "TRY AGAIN"
             }
         }
     }
 
     func hide() {
         guard shown else { return }
+        context?.invalidate()
+        context = nil
         NSApp.presentationOptions = []
         let going = windows
         windows = []
