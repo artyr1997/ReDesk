@@ -1962,7 +1962,7 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// A life of 90 years as the day's line on the desk: a faint line, a mark at its middle (45), and
+    /// A life of 90 years as the day's line on the desk, MEMENTO MORI over it: a faint line, a mark at its middle (45), and
     /// the diamond at how far in. Without a birthday, no diamond.
     private func drawLife() {
         let width = bounds.width * 0.24
@@ -1970,6 +1970,11 @@ final class LockFace: NSView {
         drawBar(in: NSRect(x: line.minX, y: line.midY - barWidth / 2, width: line.width, height: barWidth), filled: 0, vertical: false)
         strong.setFill()
         NSRect(x: line.midX - 0.75, y: line.minY, width: 1.5, height: line.height).fill()
+        let title = NSAttributedString(string: "MEMENTO MORI", attributes: [
+            .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
+        ])
+        let t = title.size()
+        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: line.maxY + 14))
         guard let birthday, let end = Calendar.current.date(byAdding: .year, value: LockFace.years, to: birthday) else { return }
         let gone = min(max(Date().timeIntervalSince(birthday) / end.timeIntervalSince(birthday), 0), 1)
         // kept inside the line so it is never cut at the ends
