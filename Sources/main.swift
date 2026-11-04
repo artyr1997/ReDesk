@@ -17,6 +17,7 @@ import ImageIO
 import IOKit.ps
 import IOKit.pwr_mgt
 import LocalAuthentication
+import LocalAuthenticationEmbeddedUI
 import ServiceManagement
 
 struct Corner {
@@ -2010,6 +2011,9 @@ final class LockScreen {
     private var before: NSRunningApplication?
     private var asking = false
     private var systemLocked = false
+    /// Touch ID being waited for without the system's prompt
+    private var touch: LAContext?
+    private var touchView: NSView?
 
     var shown: Bool { !windows.isEmpty }
 
@@ -2128,6 +2132,7 @@ final class LockScreen {
             main.makeKeyAndOrderFront(nil)
             main.makeFirstResponder(main.contentView?.subviews.last)
         }
+        waitForTouch()
         NSCursor.setHiddenUntilMouseMoves(true)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Crossfade.themeDuration
@@ -2135,9 +2140,39 @@ final class LockScreen {
         }
     }
 
-    /// Touch ID, or the Mac's password; the screen steps down under the system's prompt meanwhile.
+    /// Touch ID without the system's prompt: an unseen LAAuthenticationView takes the prompt's place, so
+    /// a finger on the key is all it takes. Tried again after a miss; once Touch ID can't (locked after
+    /// misses, or none), a key or a click brings the system's prompt with the password.
+    private func waitForTouch() {
+        guard shown, let face = faces.first(where: { $0.main }) else { return }
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else { return }
+        let view = LAAuthenticationView(context: context, controlSize: .small)
+        view.frame = NSRect(x: 0, y: 0, width: 16, height: 16)
+        view.alphaValue = 0
+        touchView?.removeFromSuperview()
+        face.addSubview(view)
+        touchView = view
+        touch = context
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "unlock the desk") { ok, error in
+            DispatchQueue.main.async {
+                guard self.shown, self.touch === context else { return }
+                if ok { return self.hide() }
+                let code = (error as? LAError)?.code
+                if code == .biometryLockout || code == .biometryNotAvailable || code == .biometryNotEnrolled {
+                    self.touch = nil
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitForTouch() }
+            }
+        }
+    }
+
+    /// A key or a click: nothing while Touch ID waits; otherwise the system's prompt (Touch ID or the
+    /// password), the screen stepping down under it meanwhile.
     private func unlock() {
-        guard shown, !asking else { return }
+        guard shown, !asking, touch == nil else { return }
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
@@ -2164,6 +2199,9 @@ final class LockScreen {
 
     func hide() {
         guard shown else { return }
+        touch?.invalidate()
+        touch = nil
+        touchView = nil
         NSApp.presentationOptions = []
         let going = windows
         windows = []
