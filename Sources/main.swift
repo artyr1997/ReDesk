@@ -2050,6 +2050,27 @@ enum YouTubeWallpaper {
     }
 
     /// Runs a tool; its status and output.
+    /// yt-dlp as the user: with a browser's YouTube cookies (YouTube asks anyone else, now and then, to confirm
+    /// they're no bot). The one that worked last first, then Chrome, Safari (it takes Full Disk Access for
+    /// ReDesk), none; Arc's yt-dlp can't read.
+    private static let cookiesKey = "youtubeCookies"
+    private static func ask(_ ytdlp: String, _ arguments: [String]) -> (status: Int32, output: String) {
+        var browsers = ["chrome", "safari", ""]
+        if let last = UserDefaults.standard.string(forKey: cookiesKey) {
+            browsers.removeAll { $0 == last }
+            browsers.insert(last, at: 0)
+        }
+        var result: (status: Int32, output: String) = (-1, "")
+        for browser in browsers {
+            result = run(ytdlp, (browser.isEmpty ? [] : ["--cookies-from-browser", browser]) + arguments)
+            if result.status == 0 {
+                UserDefaults.standard.set(browser, forKey: cookiesKey)
+                return result
+            }
+        }
+        return result
+    }
+
     private static func run(_ path: String, _ arguments: [String]) -> (status: Int32, output: String) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
@@ -2077,7 +2098,7 @@ enum YouTubeWallpaper {
               let link = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
         else { return done(nil, false) }
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = run(ytdlp, ["-f", format, "--no-playlist", "--print", "is_live", "--print", "url", link])
+            let result = ask(ytdlp, ["-f", format, "--no-playlist", "--print", "is_live", "--print", "url", link])
             let lines = result.output.split(separator: "\n").map(String.init)
             let stream = result.status == 0 && lines.count >= 2 ? URL(string: lines[1]) : nil
             DispatchQueue.main.async { done(stream, lines.first == "True") }
@@ -2090,7 +2111,7 @@ enum YouTubeWallpaper {
         guard let ytdlp = tool("yt-dlp") else { return fail("It takes yt-dlp: brew install yt-dlp") }
         progress = "looking"
         DispatchQueue.global(qos: .userInitiated).async {
-            let info = run(ytdlp, ["--skip-download", "--no-playlist", "--print", "%(title).80B [%(id)s]",
+            let info = ask(ytdlp, ["--skip-download", "--no-playlist", "--print", "%(title).80B [%(id)s]",
                                    "--print", "webpage_url", link])
             let lines = info.output.split(separator: "\n").map(String.init)
             guard info.status == 0, lines.count >= 2 else { return fail("YouTube didn't give the video.") }
