@@ -1838,20 +1838,11 @@ final class DeskWindow: NSWindow {
 
 // ── the lock screen ──
 // ⌃⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
-// (a video one moving), the time, the date and the day line — until Touch ID or the Mac's password
+// (a video one moving), the date and the day line — until Touch ID or the Mac's password
 // says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
 // still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
 
-/// The face: the time large in Kurale, the date and UNLOCK in the apps' small letters.
-private let clockFont: (CGFloat) -> NSFont = { size in
-    if let url = Bundle.main.url(forResource: "Kurale", withExtension: "woff"),
-       let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
-       let first = descriptors.first {
-        return CTFontCreateWithFontDescriptor(first, size, nil) as NSFont
-    }
-    return .systemFont(ofSize: size, weight: .light)
-}
-
+/// The face: the date and UNLOCK in the apps' small letters, the day line under the date.
 /// The day line on the lock screen: only to look at (no menu of the desk's under a right click).
 final class LockDay: DayView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -1881,29 +1872,20 @@ final class LockFace: NSView {
     override func rightMouseDown(with event: NSEvent) { unlock() }
     override func keyDown(with event: NSEvent) { unlock() }
 
-    /// the middle of the face: where the time stands
-    var clockLine: CGFloat { bounds.midY + bounds.height * 0.06 }
+    /// the middle of the face: where the date stands, the day line under it
+    var clockLine: CGFloat { bounds.midY + 12 }
 
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
         let now = Date()
-        let time = DateFormatter()
-        time.dateFormat = DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: .current)
-        let size = min(bounds.height * 0.17, 168)
-        let clock = NSAttributedString(string: time.string(from: now), attributes: [
-            .font: clockFont(size), .foregroundColor: ink(0.95),
-        ])
-        let c = clock.size()
-        clock.draw(at: NSPoint(x: bounds.midX - c.width / 2, y: clockLine - c.height / 2))
-
         let day = DateFormatter()
         day.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
         let small = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
         let date = NSAttributedString(string: day.string(from: now).uppercased(), attributes: [
-            .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.6),
+            .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.8),
         ])
         let d = date.size()
-        date.draw(at: NSPoint(x: bounds.midX - d.width / 2, y: clockLine - c.height / 2 - d.height - 6))
+        date.draw(at: NSPoint(x: bounds.midX - d.width / 2, y: clockLine))
 
         let hint = NSAttributedString(string: asking ? "TOUCH ID OR PASSWORD" : "UNLOCK", attributes: [
             .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
@@ -2028,7 +2010,7 @@ final class LockScreen {
             if face.main {
                 // the day line under the date, as on the desk
                 let width = bounds.width * 0.24
-                let day = LockDay(frame: NSRect(x: bounds.midX - width / 2, y: face.clockLine - bounds.height * 0.2, width: width, height: 18))
+                let day = LockDay(frame: NSRect(x: bounds.midX - width / 2, y: face.clockLine - 34, width: width, height: 18))
                 face.addSubview(day)
             }
             faces.append(face)
