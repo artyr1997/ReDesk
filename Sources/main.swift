@@ -15,6 +15,8 @@ import Carbon.HIToolbox
 import CoreAudio
 import ImageIO
 import IOKit.ps
+import IOKit.pwr_mgt
+import LocalAuthentication
 import ServiceManagement
 
 struct Corner {
@@ -215,7 +217,7 @@ final class LiveWallpaper {
         }
     }
 
-    private var player: AVQueuePlayer?
+    private(set) var player: AVQueuePlayer?
     private var looper: AVPlayerLooper?
     private var windows: [NSWindow] = []
     private(set) var url: URL?
@@ -429,6 +431,7 @@ enum HotKeys {
             case 44: Tiler.shared.resize(.right)
             case 31: Appearance.toggle()
             case 32: LiveWallpaper.shared.frozen.toggle()
+            case 33: LockScreen.shared.show()
             default: break
             }
             return noErr
@@ -436,7 +439,8 @@ enum HotKeys {
         let modifiers = UInt32(controlKey | optionKey)
         let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
             + commanded.map { ($0.id, $0.key, modifiers | UInt32(cmdKey)) }
-            + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey))]
+            + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey)),
+               (UInt32(33), kVK_ANSI_L, UInt32(cmdKey | controlKey))]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
@@ -1277,6 +1281,9 @@ class DeskView: NSView {
         theme.keyEquivalentModifierMask = [.command, .shift]
         theme.target = self
         theme.state = Appearance.dark ? .on : .off
+        let lock = menu.addItem(withTitle: "Lock Screen", action: #selector(lockScreen), keyEquivalent: "l")
+        lock.keyEquivalentModifierMask = [.command, .control]
+        lock.target = self
         menu.addItem(.separator())
         let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
@@ -1286,6 +1293,8 @@ class DeskView: NSView {
     }
 
     @objc private func toggleTiling() { Tiler.shared.on.toggle() }
+
+    @objc private func lockScreen() { LockScreen.shared.show() }
 
     @objc private func toggleCursors() { InkCursors.on.toggle() }
 
@@ -1560,7 +1569,7 @@ func drawBar(in rect: NSRect, filled: Double, vertical: Bool) {
 }
 
 /// Today, midnight to midnight, as a faint line with a mark at noon; a diamond stands at now.
-final class DayView: DeskView {
+class DayView: DeskView {
     override func draw(_ dirtyRect: NSRect) {
         let calendar = Calendar.current
         let now = Date()
@@ -1826,6 +1835,277 @@ final class DeskWindow: NSWindow {
     }
 }
 
+
+// ── the lock screen ──
+// ⌃⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
+// (a video one moving), the time, the date and the day line — until Touch ID or the Mac's password
+// says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
+// still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
+
+/// The face: the time large in Kurale, the date and UNLOCK in the apps' small letters.
+private let clockFont: (CGFloat) -> NSFont = { size in
+    if let url = Bundle.main.url(forResource: "Kurale", withExtension: "woff"),
+       let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+       let first = descriptors.first {
+        return CTFontCreateWithFontDescriptor(first, size, nil) as NSFont
+    }
+    return .systemFont(ofSize: size, weight: .light)
+}
+
+/// The day line on the lock screen: only to look at (no menu of the desk's under a right click).
+final class LockDay: DayView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+final class LockWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+final class LockFace: NSView {
+    var unlock: () -> Void = {}
+    /// the screen with the time (the others only show the wallpaper)
+    let main: Bool
+    var asking = false { didSet { needsDisplay = true } }
+
+    init(frame: NSRect, main: Bool) {
+        self.main = main
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { unlock() }
+    override func rightMouseDown(with event: NSEvent) { unlock() }
+    override func keyDown(with event: NSEvent) { unlock() }
+
+    /// the middle of the face: where the time stands
+    var clockLine: CGFloat { bounds.midY + bounds.height * 0.06 }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard main else { return }
+        let now = Date()
+        let time = DateFormatter()
+        time.dateFormat = DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: .current)
+        let size = min(bounds.height * 0.17, 168)
+        let clock = NSAttributedString(string: time.string(from: now), attributes: [
+            .font: clockFont(size), .foregroundColor: ink(0.95),
+        ])
+        let c = clock.size()
+        clock.draw(at: NSPoint(x: bounds.midX - c.width / 2, y: clockLine - c.height / 2))
+
+        let day = DateFormatter()
+        day.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
+        let small = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
+        let date = NSAttributedString(string: day.string(from: now).uppercased(), attributes: [
+            .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.6),
+        ])
+        let d = date.size()
+        date.draw(at: NSPoint(x: bounds.midX - d.width / 2, y: clockLine - c.height / 2 - d.height - 6))
+
+        let hint = NSAttributedString(string: asking ? "TOUCH ID OR PASSWORD" : "UNLOCK", attributes: [
+            .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
+        ])
+        let h = hint.size()
+        hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
+    }
+}
+
+final class LockScreen {
+    static let shared = LockScreen()
+
+    private var windows: [LockWindow] = []
+    private var faces: [LockFace] = []
+    private var clock: Timer?
+    private var shownAt: Date?
+    private var before: NSRunningApplication?
+    private var asking = false
+    private var systemLocked = false
+
+    var shown: Bool { !windows.isEmpty }
+
+    /// minutes with nothing touched before it comes (0: only ⌃⌘L)
+    var idleMinutes: Double {
+        UserDefaults.standard.object(forKey: "lockAfterMinutes") as? Double ?? 5
+    }
+    /// minutes on it before the Mac's own lock comes too
+    let systemLockMinutes: Double = 10
+
+    /// Watches for the idle time and the Mac's own lock.
+    func start() {
+        let timer = Timer(timeInterval: 10, repeats: true) { [weak self] _ in self?.check() }
+        RunLoop.main.add(timer, forMode: .common)
+        let center = DistributedNotificationCenter.default()
+        center.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            self?.systemLocked = true
+        }
+        // the Mac unlocked with its own password: no second unlocking here
+        center.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            self?.systemLocked = false
+            self?.hide()
+        }
+    }
+
+    private func check() {
+        if shown {
+            if !systemLocked, !asking, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
+                lockTheMac()
+            }
+            return
+        }
+        guard idleMinutes > 0, !systemLocked else { return }
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        if idle >= idleMinutes * 60 && !somethingKeepsTheScreenOn() { show() }
+    }
+
+    /// A video playing, a call, a presentation: whatever keeps the display awake keeps this away too.
+    private func somethingKeepsTheScreenOn() -> Bool {
+        var status: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsStatus(&status) == kIOReturnSuccess,
+              let dict = status?.takeRetainedValue() as? [String: Int] else { return false }
+        return (dict[kIOPMAssertPreventUserIdleDisplaySleep as String] ?? 0) > 0
+            || (dict["PreventUserIdleDisplaySleep"] ?? 0) > 0
+    }
+
+    /// The Mac's own lock (login.framework, as the menu's Lock Screen does); its display sleep if that can't be found.
+    private func lockTheMac() {
+        typealias Lock = @convention(c) () -> Int32
+        if let framework = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_LAZY),
+           let symbol = dlsym(framework, "SACLockScreenImmediate") {
+            _ = unsafeBitCast(symbol, to: Lock.self)()
+        } else {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+            task.arguments = ["displaysleepnow"]
+            try? task.run()
+        }
+        systemLocked = true
+    }
+
+    func show() {
+        guard !shown else { return }
+        before = NSWorkspace.shared.frontmostApplication
+        shownAt = Date()
+        let mainScreen = NSScreen.screens.first
+        for screen in NSScreen.screens {
+            let window = LockWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isOpaque = true
+            window.backgroundColor = .black
+            window.hasShadow = false
+            window.level = .screenSaver
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+            window.isReleasedWhenClosed = false
+            let bounds = NSRect(origin: .zero, size: screen.frame.size)
+            let container = NSView(frame: bounds)
+            container.wantsLayer = true
+
+            // the wallpaper: its picture (a video's still), the video moving over it, a light veil for the letters
+            let still = NSView(frame: bounds)
+            still.wantsLayer = true
+            if let url = NSWorkspace.shared.desktopImageURL(for: screen), let image = Crossfade.picture(url, for: screen) {
+                still.layer?.contents = image
+                still.layer?.contentsGravity = .resizeAspectFill
+            }
+            container.addSubview(still)
+            if let player = LiveWallpaper.shared.player {
+                let video = NSView(frame: bounds)
+                let layer = AVPlayerLayer(player: player)
+                layer.videoGravity = .resizeAspectFill
+                video.layer = layer
+                video.wantsLayer = true
+                container.addSubview(video)
+            }
+            let veil = NSView(frame: bounds)
+            veil.wantsLayer = true
+            veil.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.25).cgColor
+            container.addSubview(veil)
+
+            let face = LockFace(frame: bounds, main: screen == mainScreen)
+            face.unlock = { [weak self] in self?.unlock() }
+            container.addSubview(face)
+            if face.main {
+                // the day line under the date, as on the desk
+                let width = bounds.width * 0.24
+                let day = LockDay(frame: NSRect(x: bounds.midX - width / 2, y: face.clockLine - bounds.height * 0.2, width: width, height: 18))
+                face.addSubview(day)
+            }
+            faces.append(face)
+
+            window.contentView = container
+            window.alphaValue = 0
+            window.setFrame(screen.frame, display: true)
+            window.orderFrontRegardless()
+            windows.append(window)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        // no Dock, no menu bar, no ⌘Tab, no Force Quit or logging out past it
+        NSApp.presentationOptions = [.hideDock, .hideMenuBar, .disableProcessSwitching, .disableForceQuit,
+                                     .disableSessionTermination, .disableHideApplication, .disableAppleMenu]
+        if let main = windows.first {
+            main.makeKeyAndOrderFront(nil)
+            main.makeFirstResponder(main.contentView?.subviews.last)
+        }
+        NSCursor.setHiddenUntilMouseMoves(true)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Crossfade.themeDuration
+            windows.forEach { $0.animator().alphaValue = 1 }
+        }
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            self?.faces.forEach { $0.needsDisplay = true; $0.subviews.forEach { $0.needsDisplay = true } }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        clock = timer
+    }
+
+    /// Touch ID, or the Mac's password; the screen steps down under the system's prompt meanwhile.
+    private func unlock() {
+        guard shown, !asking else { return }
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            // nothing to ask with (no password on the Mac): it just opens
+            return hide()
+        }
+        asking = true
+        faces.forEach { $0.asking = true }
+        windows.forEach { $0.level = .floating }
+        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "unlock the desk") { ok, _ in
+            DispatchQueue.main.async {
+                self.asking = false
+                self.faces.forEach { $0.asking = false }
+                if ok {
+                    self.hide()
+                } else {
+                    self.windows.forEach { $0.level = .screenSaver }
+                    NSApp.activate(ignoringOtherApps: true)
+                    self.windows.first?.makeKeyAndOrderFront(nil)
+                }
+            }
+        }
+    }
+
+    func hide() {
+        guard shown else { return }
+        clock?.invalidate()
+        clock = nil
+        NSApp.presentationOptions = []
+        let going = windows
+        windows = []
+        faces = []
+        shownAt = nil
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.25
+            going.forEach { $0.animator().alphaValue = 0 }
+        }, completionHandler: {
+            going.forEach { $0.orderOut(nil) }
+        })
+        before?.activate()
+        before = nil
+    }
+}
+
 final class Desk: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         InkCursors.restore()
@@ -1880,6 +2160,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         // a minute of the day is a few pixels at most; the battery moves slower still
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
         HotKeys.register()
+        LockScreen.shared.start()
         Wallpapers.appearanceChanged()
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in LiveWallpaper.shared.pause() }

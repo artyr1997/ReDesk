@@ -34,6 +34,7 @@ Around them:
 | ⌘⇧↑ / ⌘⇧↓ | in the Re apps | previous / next wallpaper |
 | ⌘⇧T | anywhere | the Mac between light and dark (through System Events: macOS asks once) |
 | ⌘⇧M | anywhere | a video wallpaper stands still, or moves again (kept between launches) |
+| ⌃⌘L | anywhere | the lock screen (also in the right-click menu, and after 5 minutes untouched unless something keeps the display awake) |
 
 The ⌘ keys are taken only while a Re app is in front, so they keep their usual meaning everywhere else (and lose it inside the Re apps: ⌘↑ / ⌘↓ no longer jump to the top / bottom of a text there). They are read with an event tap, which needs the same Accessibility permission as tiling.
 
@@ -48,3 +49,7 @@ The pieces sit just above the desktop icons and below every window, in the apps'
 ```
 
 Then copy `build/ReDesk.app` to `/Applications/ReSpace` (next to the other Re apps) and open it.
+
+## Lock screen
+
+⌃⌘L, the right-click menu's Lock Screen, or 5 minutes with nothing touched (the `lockAfterMinutes` default; 0 turns that off; a playing video or anything else keeping the display awake holds it off): the desk's own screen over every other window, the Dock and the menu bar hidden and ⌘Tab, Force Quit and logging out held. The wallpaper (a video one moving, unless frozen with ⌘⇧M) under a light veil, the time large in Kurale, the date and the day line. A key or a click asks for Touch ID or the Mac's password (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac still unlocked, so after 10 minutes on it the Mac's own lock comes too; unlocking that lets this screen go.
