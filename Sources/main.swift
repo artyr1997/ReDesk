@@ -2113,9 +2113,10 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// the corner diamond, where FILE's column meets the bottom words' line on the desk
+    /// the birthday diamond, over MEMENTO MORI
     private var corner: NSPoint {
-        NSPoint(x: bounds.minX + bounds.width * 0.05, y: bounds.minY + bounds.height * 0.0625 + 8)
+        let title = NSAttributedString(string: "MEMENTO MORI", attributes: [.font: lockLetters]).size()
+        return NSPoint(x: bounds.midX, y: bounds.midY + 9 + 14 + title.height + 18)
     }
 
     override func mouseDown(with event: NSEvent) {
