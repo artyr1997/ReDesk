@@ -1876,7 +1876,7 @@ final class LockFace: NSView {
     var asking = false { didSet { needsDisplay = true } }
     private var field: BirthdayField?
 
-    /// a life of 90 years, a row each, 52 weeks across
+    /// a life of 90 years, a column each, 52 weeks down
     static let years = 90, weeks = 52
 
     init(frame: NSRect, main: Bool) {
@@ -1953,33 +1953,35 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// Every week of a life of 90 years, a row a year: the weeks gone in the strong ink, this one
-    /// in full, those to come faint. Without a birthday, all of them to come.
+    /// Every week of a life of 90 years, lying on its side: a column a year (left to right, a wider gap
+    /// every ten years), its 52 weeks from the top down. The weeks gone in the strong ink, this one in
+    /// full, those to come faint. Without a birthday, all of them to come.
     private func drawLife() {
-        let rows = LockFace.years, columns = LockFace.weeks
+        let years = LockFace.years, weeks = LockFace.weeks
         // the middle of the screen, between the top and UNLOCK
-        let room = NSRect(x: bounds.minX, y: bounds.minY + bounds.height * 0.14,
-                          width: bounds.width, height: bounds.height * 0.74)
-        // a cell's step, a little wider gap every ten years
-        let step = floor(min(room.height / (CGFloat(rows) + 8), room.width * 0.5 / CGFloat(columns)) * 2) / 2
+        let room = NSRect(x: bounds.minX + bounds.width * 0.1, y: bounds.minY + bounds.height * 0.16,
+                          width: bounds.width * 0.8, height: bounds.height * 0.7)
+        let gaps = CGFloat(years / 10 - 1) * 0.8
+        let step = floor(min(room.width / (CGFloat(years) + gaps), room.height / CGFloat(weeks)) * 2) / 2
         let dot = max(step * 0.62, 1.5)
-        let width = CGFloat(columns) * step
-        let height = CGFloat(rows) * step + CGFloat(rows / 10 - 1) * step * 0.8
+        let width = (CGFloat(years) + gaps) * step
+        let height = CGFloat(weeks) * step
         let left = floor(room.midX - width / 2), top = floor(room.midY + height / 2)
 
         let calendar = Calendar.current
         let now = Date()
         let gone = NSBezierPath(), current = NSBezierPath(), coming = NSBezierPath()
-        for row in 0 ..< rows {
-            let start = birthday.flatMap { calendar.date(byAdding: .year, value: row, to: $0) }
-            let next = birthday.flatMap { calendar.date(byAdding: .year, value: row + 1, to: $0) }
-            let y = top - CGFloat(row + 1) * step - CGFloat(row / 10) * step * 0.8
-            for column in 0 ..< columns {
-                let rect = NSRect(x: left + CGFloat(column) * step + (step - dot) / 2, y: y + (step - dot) / 2, width: dot, height: dot)
+        for year in 0 ..< years {
+            let start = birthday.flatMap { calendar.date(byAdding: .year, value: year, to: $0) }
+            let next = birthday.flatMap { calendar.date(byAdding: .year, value: year + 1, to: $0) }
+            let x = left + CGFloat(year) * step + CGFloat(year / 10) * step * 0.8
+            for week in 0 ..< weeks {
+                let y = top - CGFloat(week + 1) * step
+                let rect = NSRect(x: x + (step - dot) / 2, y: y + (step - dot) / 2, width: dot, height: dot)
                 let path: NSBezierPath
-                if let start, let weekStart = calendar.date(byAdding: .day, value: column * 7, to: start) {
+                if let start, let weekStart = calendar.date(byAdding: .day, value: week * 7, to: start) {
                     // the year's last week runs to the next birthday
-                    let weekEnd = column == columns - 1 ? (next ?? weekStart) : calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+                    let weekEnd = week == weeks - 1 ? (next ?? weekStart) : calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
                     path = weekEnd <= now ? gone : weekStart <= now ? current : coming
                 } else {
                     path = coming
