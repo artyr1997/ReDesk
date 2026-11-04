@@ -2113,9 +2113,9 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// the birthday diamond a quarter of the screen down from the top; MEMENTO MORI under it
+    /// the birthday diamond, just over UNLOCK
     private var corner: NSPoint {
-        NSPoint(x: bounds.midX, y: bounds.maxY - bounds.height * 0.25)
+        NSPoint(x: bounds.midX, y: bounds.minY + bounds.height * 0.0625 + 36)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -2185,24 +2185,23 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// A life of 90 years as the day's line on the desk, MEMENTO MORI over it, high up: a faint line, a mark at its middle (45), and
-    /// the diamond at how far in. Without a birthday, no diamond.
+    /// A life of 90 years as a line like the day's on the desk, MEMENTO MORI over it: filled as far as lived, a mark at
+    /// its middle (45). Without a birthday, nothing filled.
     private func drawLife() {
         let width = bounds.width * 0.24
         let line = NSRect(x: bounds.midX - width / 2, y: bounds.midY - 9, width: width, height: 18)
-        drawBar(in: NSRect(x: line.minX, y: line.midY - barWidth / 2, width: line.width, height: barWidth), filled: 0, vertical: false)
+        var gone = 0.0
+        if let birthday, let end = Calendar.current.date(byAdding: .year, value: LockFace.years, to: birthday) {
+            gone = Date().timeIntervalSince(birthday) / end.timeIntervalSince(birthday)
+        }
+        drawBar(in: NSRect(x: line.minX, y: line.midY - barWidth / 2, width: line.width, height: barWidth), filled: gone, vertical: false)
         strong.setFill()
         NSRect(x: line.midX - 0.75, y: line.minY, width: 1.5, height: line.height).fill()
         let title = NSAttributedString(string: "MEMENTO MORI", attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let t = title.size()
-        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: corner.y - 18 - t.height))
-        guard let birthday, let end = Calendar.current.date(byAdding: .year, value: LockFace.years, to: birthday) else { return }
-        let gone = min(max(Date().timeIntervalSince(birthday) / end.timeIntervalSince(birthday), 0), 1)
-        // kept inside the line so it is never cut at the ends
-        let r = diamondSize / 2
-        drawDiamond(at: NSPoint(x: line.minX + r + (line.width - diamondSize) * CGFloat(gone), y: line.midY))
+        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: line.maxY + 14))
     }
 }
 
