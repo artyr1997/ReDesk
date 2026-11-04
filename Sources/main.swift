@@ -1270,7 +1270,7 @@ enum InkCursors {
     // accepted, without effect (Mousecape PR #308)
     private static let shapes = [
         Shape(names: ["com.apple.coregraphics.ArrowS", "com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowCtx"],
-              day: "cursor-arrow-night", night: "cursor-arrow-night", hotspot: CGPoint(x: 1.5, y: 1.5), rimmed: true),
+              day: "cursor-arrow-night", night: "cursor-arrow-night", hotspot: CGPoint(x: 1, y: 1), rimmed: true),
         Shape(names: ["com.apple.coregraphics.IBeamS", "com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamXOR"],
               day: "cursor-ibeam", night: "cursor-ibeam-night", hotspot: CGPoint(x: 10, y: 10)),
         // the hand has a white body inside its outline: it reads on both
@@ -1325,23 +1325,39 @@ enum InkCursors {
                 ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
                 return ctx.makeImage()
             }
-            // the ink a little smaller, room left round it for the rim: its dark shape drawn all round it
+            // the ink a little smaller, room left round it for the rim; pure white, its tip made sharp (the
+            // brush's own tip is too thin to see at this size); its dark shape drawn all round it
             let rim = CGFloat(side) * 0.04
-            let place = CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: rim, dy: rim)
-            guard let shade = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            let whole = CGRect(x: 0, y: 0, width: side, height: side)
+            let place = whole.insetBy(dx: rim, dy: rim)
+            func layer(_ color: CGColor, from source: CGImage?) -> CGImage? {
+                guard let c = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
                                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-            shade.interpolationQuality = .high
-            shade.draw(image, in: place)
-            shade.setBlendMode(.sourceIn)
-            shade.setFillColor(CGColor(srgbRed: 0.08, green: 0.08, blue: 0.08, alpha: 0.9))
-            shade.fill(CGRect(x: 0, y: 0, width: side, height: side))
-            guard let dark = shade.makeImage() else { return nil }
+                c.interpolationQuality = .high
+                if let source {
+                    c.draw(source, in: whole)
+                } else {
+                    c.draw(image, in: place)
+                    // the tip: a wedge along the head's two edges (in the 200 × 200 picture, from its top left)
+                    let k = place.width / 200
+                    func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: place.minX + x * k, y: place.maxY - y * k) }
+                    c.move(to: at(1, 1)); c.addLine(to: at(36, 18)); c.addLine(to: at(16, 36)); c.closePath()
+                    c.setFillColor(.white)
+                    c.fillPath()
+                }
+                c.setBlendMode(.sourceIn)
+                c.setFillColor(color)
+                c.fill(whole)
+                return c.makeImage()
+            }
+            guard let ink = layer(.white, from: nil),
+                  let dark = layer(CGColor(srgbRed: 0.08, green: 0.08, blue: 0.08, alpha: 0.9), from: ink) else { return nil }
             for step in 0..<16 {
                 let angle = CGFloat(step) / 16 * 2 * .pi
-                ctx.draw(dark, in: place.offsetBy(dx: cos(angle) * rim, dy: sin(angle) * rim))
+                ctx.draw(dark, in: whole.offsetBy(dx: cos(angle) * rim, dy: sin(angle) * rim))
             }
-            ctx.draw(image, in: place)
+            ctx.draw(ink, in: whole)
             return ctx.makeImage()
         }
     }
