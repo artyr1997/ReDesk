@@ -286,7 +286,7 @@ final class LiveWallpaper {
 
     /// A YouTube video straight from YouTube: a live one as it goes, any other round and round.
     private func stream(_ link: URL, into player: AVQueuePlayer) {
-        YouTubeWallpaper.resolve(link) { [weak self] stream, live in
+        YouTubeWallpaper.resolve(link) { [weak self] stream, live, headers in
             guard let self, self.player === player else { return }
             guard let stream else {
                 // no answer now (offline, or YouTube asking to confirm it's no bot): asked again later and
@@ -295,15 +295,31 @@ final class LiveWallpaper {
                 return self.watchStream(link, player, after: min(60 * pow(2, Double(self.misses - 1)), 1800), waiting: true)
             }
             self.misses = 0
-            let item = AVPlayerItem(url: stream)
+            let item = AVPlayerItem(asset: AVURLAsset(url: stream, options: ["AVURLAssetHTTPHeaderFieldsKey": headers]))
             self.looper = nil
+            if let ended = self.ended { NotificationCenter.default.removeObserver(ended) }
+            self.ended = nil
             player.removeAllItems()
-            if live {
-                player.insert(item, after: nil)
-            } else {
-                self.looper = AVPlayerLooper(player: player, templateItem: item)
+            player.insert(item, after: nil)
+            if !live {
+                // round and round: AVPlayerLooper doesn't take a stream, so back to the start at its end
+                player.actionAtItemEnd = .none
+                self.ended = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
+                                                                    object: item, queue: .main) { [weak player] _ in
+                    player?.seek(to: .zero)
+                }
             }
             if !self.frozen && !self.resting { player.play() }
+            YouTubeWallpaper.note("\(link.deletingPathExtension().lastPathComponent): stream from \(stream.host ?? "?")\(live ? ", live" : "")")
+            // how it went, a little later
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak player] in
+                guard let player, let item = player.currentItem else { return YouTubeWallpaper.note("  no item after 20 s") }
+                let event = item.accessLog()?.events.last
+                YouTubeWallpaper.note("  after 20 s: item \(item.status.rawValue), \(player.timeControlStatus.rawValue) \(player.reasonForWaitingToPlay?.rawValue ?? ""), "
+                    + "\(Int(item.presentationSize.width))×\(Int(item.presentationSize.height)), \(Int(event?.numberOfBytesTransferred ?? 0) / 1000) kB"
+                    + (item.error.map { ", error \($0.localizedDescription)" } ?? "")
+                    + (item.errorLog()?.events.last.map { ", log \($0.errorStatusCode) \($0.errorComment ?? "") at \(($0.uri ?? "?").prefix(70))" } ?? ""))
+            }
             // YouTube's links last some six hours: a fresh one well before
             self.watchStream(link, player, after: 4 * 3600)
         }
@@ -311,6 +327,8 @@ final class LiveWallpaper {
 
     /// YouTube's answers missed in a row
     private var misses = 0
+    /// a YouTube video's end, watched to start it again
+    private var ended: NSObjectProtocol?
 
     /// Asks YouTube again after `after` seconds; while a stream plays, sooner, at the minute, when it has failed or
     /// stopped (`waiting`: none yet, only the time counts).
@@ -333,6 +351,8 @@ final class LiveWallpaper {
     func stop() {
         watch?.invalidate()
         watch = nil
+        if let ended { NotificationCenter.default.removeObserver(ended) }
+        ended = nil
         player?.pause()
         looper = nil
         player = nil
@@ -2071,6 +2091,15 @@ enum YouTubeWallpaper {
         return result
     }
 
+    /// A line in Application Support/ReDesk/YouTube.log: how the streams went (the last 200 lines kept).
+    static func note(_ text: String) {
+        let file = Wallpapers.stills.appendingPathComponent("YouTube.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        var lines = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        lines.append("\(stamp) \(text)")
+        try? lines.suffix(200).joined(separator: "\n").appending("\n").write(to: file, atomically: true, encoding: .utf8)
+    }
+
     private static func run(_ path: String, _ arguments: [String]) -> (status: Int32, output: String) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
@@ -2080,10 +2109,23 @@ enum YouTubeWallpaper {
         task.environment = environment
         let pipe = Pipe()
         task.standardOutput = pipe
-        task.standardError = Pipe()
+        let errors = Pipe()
+        task.standardError = errors
         guard (try? task.run()) != nil else { return (-1, "") }
+        // read side by side: a full pipe would hold yt-dlp up
+        var said = Data()
+        let reading = DispatchGroup()
+        DispatchQueue.global().async(group: reading) { said = errors.fileHandleForReading.readDataToEndOfFile() }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
+        reading.wait()
+        for warning in String(decoding: said, as: UTF8.self).split(separator: "\n") where warning.hasPrefix("WARNING") {
+            note("  \(warning.prefix(240))")
+        }
+        if task.terminationStatus != 0 {
+            let last = String(decoding: said, as: UTF8.self).split(separator: "\n").last { $0.hasPrefix("ERROR") } ?? "no error said"
+            note("yt-dlp \(arguments.prefix(2).joined(separator: " ")): \(last.prefix(200))")
+        }
         return (task.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
@@ -2093,15 +2135,24 @@ enum YouTubeWallpaper {
 
     /// Where a .youtube file's video streams from now, and whether it is live. On the main thread; nil
     /// when YouTube didn't say.
-    static func resolve(_ file: URL, then done: @escaping (URL?, Bool) -> Void) {
+    /// The headers go with it: YouTube gives the stream to the one it gave the link to (403 to anyone else).
+    static func resolve(_ file: URL, then done: @escaping (URL?, Bool, [String: String]) -> Void) {
         guard let ytdlp = tool("yt-dlp"),
               let link = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        else { return done(nil, false) }
+        else { return done(nil, false, [:]) }
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = ask(ytdlp, ["-f", format, "--no-playlist", "--print", "is_live", "--print", "url", link])
+            let result = ask(ytdlp, ["-f", format, "--no-playlist", "--print", "is_live", "--print", "url",
+                                     "--print", "%(http_headers)j", "--print", "%(format_id)s %(height)sp %(vcodec)s",
+                                     "--print", "%(available_at|0)s", link])
             let lines = result.output.split(separator: "\n").map(String.init)
             let stream = result.status == 0 && lines.count >= 2 ? URL(string: lines[1]) : nil
-            DispatchQueue.main.async { done(stream, lines.first == "True") }
+            let headers = lines.count >= 3
+                ? (try? JSONSerialization.jsonObject(with: Data(lines[2].utf8))) as? [String: String] ?? [:] : [:]
+            if stream != nil, lines.count >= 4 { note("  format \(lines[3])") }
+            // YouTube gives the video only some seconds after the link (403 till then), as yt-dlp waits too
+            let at = lines.count >= 5 ? Double(lines[4]) ?? 0 : 0
+            let wait = min(max(at - Date().timeIntervalSince1970 + 0.5, 0), 30)
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { done(stream, lines.first == "True", headers) }
         }
     }
 
