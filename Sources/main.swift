@@ -2051,11 +2051,11 @@ enum YouTubeWallpaper {
 
     /// Runs a tool; its status and output.
     /// yt-dlp as the user: with a browser's YouTube cookies (YouTube asks anyone else, now and then, to confirm
-    /// they're no bot). The one that worked last first, then Chrome, Safari (it takes Full Disk Access for
-    /// ReDesk), none; Arc's yt-dlp can't read.
+    /// they're no bot). The one that worked last first, then Safari (it takes Full Disk Access for ReDesk),
+    /// Chrome, none; Arc's yt-dlp can't read.
     private static let cookiesKey = "youtubeCookies"
     private static func ask(_ ytdlp: String, _ arguments: [String]) -> (status: Int32, output: String) {
-        var browsers = ["chrome", "safari", ""]
+        var browsers = ["safari", "chrome", ""]
         if let last = UserDefaults.standard.string(forKey: cookiesKey) {
             browsers.removeAll { $0 == last }
             browsers.insert(last, at: 0)
