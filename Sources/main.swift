@@ -89,7 +89,8 @@ struct Layout {
 
 enum Wallpapers {
     static let pictures = ["jpg", "jpeg", "png", "heic"]
-    static let videos = ["mp4", "mov", "m4v"]
+    /// .youtube: a link to a video on YouTube, played straight from there (YouTubeWallpaper)
+    static let videos = ["mp4", "mov", "m4v", "youtube"]
 
     /// wallpapers/Light and wallpapers/Dark: for the Mac's light and dark appearance
     private static func folder(_ name: String) -> [URL] {
@@ -242,6 +243,8 @@ final class LiveWallpaper {
     private var looper: AVPlayerLooper?
     private var windows: [NSWindow] = []
     private(set) var url: URL?
+    /// a YouTube stream: looked after (a fresh link before YouTube's runs out, or after it fails)
+    private var watch: Timer?
 
     func play(_ url: URL) {
         guard url != self.url else { return }
@@ -250,13 +253,60 @@ final class LiveWallpaper {
         let player = AVQueuePlayer()
         player.isMuted = true
         player.preventsDisplaySleepDuringVideoPlayback = false
-        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         self.player = player
+        if url.pathExtension == "youtube" {
+            // its still shows at once; the stream comes over it when YouTube has said where it is
+            layout()
+            stream(url, into: player)
+            return
+        }
+        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         layout()
         if !frozen { player.play() }
     }
 
+    /// A YouTube video straight from YouTube: a live one as it goes, any other round and round.
+    private func stream(_ link: URL, into player: AVQueuePlayer) {
+        YouTubeWallpaper.resolve(link) { [weak self] stream, live in
+            guard let self, self.player === player else { return }
+            guard let stream else {
+                // no answer now (offline, say): asked again in a minute
+                return self.watchStream(link, player, after: 60)
+            }
+            let item = AVPlayerItem(url: stream)
+            self.looper = nil
+            player.removeAllItems()
+            if live {
+                player.insert(item, after: nil)
+            } else {
+                self.looper = AVPlayerLooper(player: player, templateItem: item)
+            }
+            if !self.frozen && !self.resting { player.play() }
+            // YouTube's links last some six hours: a fresh one well before
+            self.watchStream(link, player, after: 4 * 3600)
+        }
+    }
+
+    /// Asks YouTube again after `after` seconds, or sooner, at the minute, when the stream has failed or stopped.
+    private func watchStream(_ link: URL, _ player: AVQueuePlayer, after: TimeInterval) {
+        watch?.invalidate()
+        let due = Date().addingTimeInterval(after)
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] timer in
+            guard let self, self.player === player else { return timer.invalidate() }
+            let failed = player.currentItem == nil || player.currentItem?.status == .failed
+                || (!self.frozen && !self.resting && player.timeControlStatus == .paused)
+            if failed || Date() >= due {
+                timer.invalidate()
+                self.stream(link, into: player)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watch = timer
+    }
+
     func stop() {
+        watch?.invalidate()
+        watch = nil
         player?.pause()
         looper = nil
         player = nil
@@ -270,6 +320,8 @@ final class LiveWallpaper {
     /// them black halfway through the fade.
     func handOver() -> (windows: [NSWindow], video: [AnyObject]) {
         let old = (windows, [player, looper].compactMap { $0 as AnyObject? })
+        watch?.invalidate()
+        watch = nil
         windows = []
         looper = nil
         player = nil
@@ -292,8 +344,10 @@ final class LiveWallpaper {
         !windows.isEmpty && windows.allSatisfy { $0.contentView?.layer?.contents != nil }
     }
 
-    func pause() { player?.pause() }
-    func resume() { if !frozen { player?.play() } }
+    /// the displays asleep
+    private var resting = false
+    func pause() { resting = true; player?.pause() }
+    func resume() { resting = false; if !frozen { player?.play() } }
 
     func layout() {
         windows.forEach { $0.orderOut(nil) }
@@ -1876,13 +1930,13 @@ final class DeskWindow: NSWindow {
 
 
 // ── wallpapers from YouTube ──
-// A link pasted in (the right-click menu's Wallpaper from YouTube…): yt-dlp fetches its picture alone,
-// no sound, in the best quality up to 4K; a video AVFoundation can't play here (VP9, AV1) is turned into
-// HEVC by ffmpeg with the Mac's own encoder. It goes to Application Support/ReDesk/YouTube and onto the desk.
-// yt-dlp and ffmpeg come from Homebrew (brew install yt-dlp ffmpeg).
+// A link pasted in (the right-click menu's Wallpaper from YouTube…) is kept, not the video: a .youtube file
+// with the link in Application Support/ReDesk/YouTube, and the video's picture as its still. Shown, yt-dlp
+// asks YouTube where the stream is: the picture alone (no sound), the best there is up to 4K, and the video
+// plays from there, a live one as it goes. yt-dlp comes from Homebrew (brew install yt-dlp).
 
 enum YouTubeWallpaper {
-    /// what the download is doing, for the menu; nil while there is none
+    /// what the adding is doing, for the menu; nil while there is none
     private(set) static var progress: String?
 
     private static let paths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
@@ -1906,7 +1960,7 @@ enum YouTubeWallpaper {
         }
         let alert = NSAlert()
         alert.messageText = "Wallpaper from YouTube"
-        alert.informativeText = "Paste a link: the video comes in its best quality, without sound."
+        alert.informativeText = "Paste a link: the video plays from YouTube in its best quality, without sound."
         alert.accessoryView = field
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
@@ -1915,7 +1969,7 @@ enum YouTubeWallpaper {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let link = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard looksLikeYouTube(link) else { return fail("That isn't a YouTube link.") }
-        download(link)
+        add(link)
     }
 
     private static func fail(_ message: String) {
@@ -1929,9 +1983,8 @@ enum YouTubeWallpaper {
         }
     }
 
-    /// Runs a tool, each line of its output handed to `line` as it comes; its status at the end.
-    @discardableResult
-    private static func run(_ path: String, _ arguments: [String], line: (String) -> Void = { _ in }) -> (status: Int32, output: String) {
+    /// Runs a tool; its status and output.
+    private static func run(_ path: String, _ arguments: [String]) -> (status: Int32, output: String) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = arguments
@@ -1940,79 +1993,61 @@ enum YouTubeWallpaper {
         task.environment = environment
         let pipe = Pipe()
         task.standardOutput = pipe
-        task.standardError = pipe
+        task.standardError = Pipe()
         guard (try? task.run()) != nil else { return (-1, "") }
-        var all = "", pending = ""
-        let handle = pipe.fileHandleForReading
-        while true {
-            let data = handle.availableData
-            if data.isEmpty { break }
-            let text = String(decoding: data, as: UTF8.self)
-            all += text
-            pending += text
-            // progress comes as lines (--newline) or carriage returns
-            let parts = pending.components(separatedBy: CharacterSet(charactersIn: "\r\n"))
-            pending = parts.last ?? ""
-            parts.dropLast().filter { !$0.isEmpty }.forEach(line)
-        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
-        return (task.terminationStatus, all)
+        return (task.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
-    private static func say(_ text: String) {
-        DispatchQueue.main.async { progress = text }
-    }
+    /// The best picture YouTube streams (HLS, which AVFoundation plays as it comes), up to 4K, never AV1
+    /// (a Mac without its decoder can't play it); any HLS stream if there is no picture alone.
+    private static let format = "bv*[protocol^=m3u8][height<=2160][vcodec!^=av01]/bv*[protocol^=m3u8][vcodec!^=av01]/b[protocol^=m3u8]"
 
-    static func download(_ link: String) {
-        guard progress == nil else { return }
-        guard let ytdlp = tool("yt-dlp"), let ffmpeg = tool("ffmpeg"), let ffprobe = tool("ffprobe") else {
-            return fail("It takes yt-dlp and ffmpeg: brew install yt-dlp ffmpeg")
-        }
-        progress = "starting"
+    /// Where a .youtube file's video streams from now, and whether it is live. On the main thread; nil
+    /// when YouTube didn't say.
+    static func resolve(_ file: URL, then done: @escaping (URL?, Bool) -> Void) {
+        guard let ytdlp = tool("yt-dlp"),
+              let link = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return done(nil, false) }
         DispatchQueue.global(qos: .userInitiated).async {
-            let work = FileManager.default.temporaryDirectory.appendingPathComponent("ReDesk-YouTube-\(UUID().uuidString)", isDirectory: true)
-            try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: work) }
+            let result = run(ytdlp, ["-f", format, "--no-playlist", "--print", "is_live", "--print", "url", link])
+            let lines = result.output.split(separator: "\n").map(String.init)
+            let stream = result.status == 0 && lines.count >= 2 ? URL(string: lines[1]) : nil
+            DispatchQueue.main.async { done(stream, lines.first == "True") }
+        }
+    }
 
-            // the picture alone, the best there is up to 4K (larger only costs, a screen shows no more)
-            let fetched = run(ytdlp, ["-f", "bv*[height<=2160]/bv*", "--no-playlist", "--newline", "--no-part",
-                                      "-o", work.appendingPathComponent("%(title).80B [%(id)s].%(ext)s").path, link]) { line in
-                if line.hasPrefix("[download]"), let percent = line.split(separator: " ").first(where: { $0.hasSuffix("%") }) {
-                    say("downloading \(percent)")
-                }
+    /// Keeps the link (and the video's picture as its still) and puts it on the desk.
+    static func add(_ link: String) {
+        guard progress == nil else { return }
+        guard let ytdlp = tool("yt-dlp") else { return fail("It takes yt-dlp: brew install yt-dlp") }
+        progress = "looking"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let info = run(ytdlp, ["--skip-download", "--no-playlist", "--print", "%(title).80B [%(id)s]",
+                                   "--print", "thumbnail", "--print", "webpage_url", link])
+            let lines = info.output.split(separator: "\n").map(String.init)
+            guard info.status == 0, lines.count >= 3 else { return fail("YouTube didn't give the video.") }
+            let name = lines[0].replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            let file = Wallpapers.youtubeFolder.appendingPathComponent(name + ".youtube")
+            guard (try? lines[2].write(to: file, atomically: true, encoding: .utf8)) != nil else {
+                return fail("It couldn't be kept.")
             }
-            let files = (try? FileManager.default.contentsOfDirectory(at: work, includingPropertiesForKeys: nil)) ?? []
-            guard fetched.status == 0, let source = files.first else {
-                let reason = fetched.output.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init)
-                return fail(reason ?? "yt-dlp couldn't get the video.")
+            // the still under the video (and the desktop's picture when ReDesk isn't there)
+            if let url = URL(string: lines[1]), let data = try? Data(contentsOf: url), let image = NSImage(data: data),
+               let tiff = image.tiffRepresentation, let jpeg = NSBitmapImageRep(data: tiff)?
+                   .representation(using: .jpeg, properties: [.compressionFactor: 0.9]) {
+                try? jpeg.write(to: Wallpapers.still(of: file))
             }
-            let codec = run(ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name",
-                                      "-of", "csv=p=0", source.path]).output.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = source.deletingPathExtension().lastPathComponent + ".mp4"
-            let out = work.appendingPathComponent("out.mp4")
-            var arguments = ["-y", "-i", source.path, "-an", "-movflags", "+faststart"]
-            if codec == "h264" {
-                arguments += ["-c:v", "copy"]
-            } else if codec == "hevc" {
-                arguments += ["-c:v", "copy", "-tag:v", "hvc1"]
-            } else {
-                // VP9 or AV1: HEVC by the Mac's encoder, generous enough for 4K
-                say("converting")
-                arguments += ["-c:v", "hevc_videotoolbox", "-b:v", "24M", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"]
-            }
-            guard run(ffmpeg, arguments + [out.path]).status == 0 else { return fail("ffmpeg couldn't make it playable.") }
-            let target = Wallpapers.youtubeFolder.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: target)
-            guard (try? FileManager.default.moveItem(at: out, to: target)) != nil else { return fail("It couldn't be kept.") }
             DispatchQueue.main.async {
                 progress = nil
                 Wallpapers.reload()
-                if let index = Wallpapers.all.firstIndex(of: target) { Wallpapers.show(index) }
+                if let index = Wallpapers.all.firstIndex(of: file) { Wallpapers.show(index) }
             }
         }
     }
 
-    /// The YouTube video on the desk goes (its file and its still), and the desk takes the one before it.
+    /// The YouTube wallpaper on the desk goes (its link and its still), and the desk takes the one before it.
     static func removeCurrent() {
         guard let index = Wallpapers.current else { return }
         let url = Wallpapers.all[index]
