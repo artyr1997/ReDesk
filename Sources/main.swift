@@ -1843,7 +1843,7 @@ final class DeskWindow: NSWindow {
 // says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
 // still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
 
-/// The face: a life in weeks (Memento Mori), UNLOCK at the bottom, and in the bottom left corner a small
+/// The face: a life as a sunflower of 90 petals (Memento Mori), UNLOCK at the bottom, and in the bottom left corner a small
 /// diamond that sets the birthday the weeks count from. Over the wallpaper, in the apps' small letters.
 let lockLetters = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
 
@@ -1877,8 +1877,8 @@ final class LockFace: NSView {
     let main: Bool
     private var field: BirthdayField?
 
-    /// a life of 90 years, a column each, 52 weeks down
-    static let years = 90, weeks = 52
+    /// a life of 90 years, a petal each
+    static let years = 90
 
     init(frame: NSRect, main: Bool) {
         self.main = main
@@ -1962,46 +1962,81 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// Every week of a life of 90 years, lying on its side: a column a year (left to right, a wider gap
-    /// every ten years), its 52 weeks from the top down. The weeks gone in the strong ink, this one in
-    /// full, those to come faint. Without a birthday, all of them to come.
+    /// A life of 90 years as a sunflower of 90 petals, a year each, from the top round clockwise: the years
+    /// gone in the strong ink, this one filling from its base as the year goes, those to come faint.
+    /// Its seeds in the middle laid as a sunflower's (the golden angle). Without a birthday, all to come.
     private func drawLife() {
-        let years = LockFace.years, weeks = LockFace.weeks
+        let years = LockFace.years
         // the middle of the screen, between the top and UNLOCK
-        let room = NSRect(x: bounds.minX + bounds.width * 0.1, y: bounds.minY + bounds.height * 0.16,
-                          width: bounds.width * 0.8, height: bounds.height * 0.7)
-        let gaps = CGFloat(years / 10 - 1) * 0.8
-        let step = floor(min(room.width / (CGFloat(years) + gaps), room.height / CGFloat(weeks)) * 2) / 2
-        let dot = max(step * 0.62, 1.5)
-        let width = (CGFloat(years) + gaps) * step
-        let height = CGFloat(weeks) * step
-        let left = floor(room.midX - width / 2), top = floor(room.midY + height / 2)
+        let room = NSRect(x: bounds.minX, y: bounds.minY + bounds.height * 0.16,
+                          width: bounds.width, height: bounds.height * 0.7)
+        let radius = min(room.width, room.height) / 2
+        let centre = NSPoint(x: room.midX, y: room.midY)
+        let disc = radius * 0.34
 
-        let calendar = Calendar.current
-        let now = Date()
-        let gone = NSBezierPath(), current = NSBezierPath(), coming = NSBezierPath()
-        for year in 0 ..< years {
-            let start = birthday.flatMap { calendar.date(byAdding: .year, value: year, to: $0) }
-            let next = birthday.flatMap { calendar.date(byAdding: .year, value: year + 1, to: $0) }
-            let x = left + CGFloat(year) * step + CGFloat(year / 10) * step * 0.8
-            for week in 0 ..< weeks {
-                let y = top - CGFloat(week + 1) * step
-                let rect = NSRect(x: x + (step - dot) / 2, y: y + (step - dot) / 2, width: dot, height: dot)
-                let path: NSBezierPath
-                if let start, let weekStart = calendar.date(byAdding: .day, value: week * 7, to: start) {
-                    // the year's last week runs to the next birthday
-                    let weekEnd = week == weeks - 1 ? (next ?? weekStart) : calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
-                    path = weekEnd <= now ? gone : weekStart <= now ? current : coming
-                } else {
-                    path = coming
-                }
-                path.appendRoundedRect(rect, xRadius: dot * 0.25, yRadius: dot * 0.25)
+        // how far into the life: whole years, and the part of this one
+        var gone = 0, part: CGFloat = 0
+        if let birthday {
+            let calendar = Calendar.current
+            let now = Date()
+            gone = min(calendar.dateComponents([.year], from: birthday, to: now).year ?? 0, years)
+            if gone < years, let start = calendar.date(byAdding: .year, value: gone, to: birthday),
+               let end = calendar.date(byAdding: .year, value: gone + 1, to: birthday) {
+                part = CGFloat(now.timeIntervalSince(start) / end.timeIntervalSince(start))
             }
         }
-        ink(0.18).setFill(); coming.fill()
-        strong.setFill(); gone.fill()
-        ink(0.95).setFill(); current.fill()
 
+        // each petal in its own slice of the circle, never over the next: widest a little past its middle,
+        // pointed at both ends; a thin gap between two
+        let slice = 2 * CGFloat.pi / CGFloat(years)
+        func petal(_ year: Int, upTo end: CGFloat = 1) -> NSBezierPath {
+            // every other petal a little shorter, as the sunflower's two rows
+            let length = (radius - disc) * (year % 2 == 0 ? 1 : 0.84)
+            let middle = CGFloat.pi / 2 - CGFloat(year) * slice
+            let steps = 24
+            let along = (0 ... steps).map { CGFloat($0) / CGFloat(steps) * end }
+            func point(_ t: CGFloat, _ side: CGFloat) -> NSPoint {
+                let half = slice / 2 * 0.86 * pow(sin(.pi * pow(t, 0.8)), 0.7)
+                let r = disc + 2 + t * length
+                let angle = middle + side * half
+                return NSPoint(x: centre.x + r * cos(angle), y: centre.y + r * sin(angle))
+            }
+            let path = NSBezierPath()
+            path.move(to: point(0, 1))
+            along.forEach { path.line(to: point($0, 1)) }
+            along.reversed().forEach { path.line(to: point($0, -1)) }
+            path.close()
+            return path
+        }
+        let goneShape = NSBezierPath(), comingShape = NSBezierPath()
+        for year in 0 ..< years {
+            (year < gone ? goneShape : comingShape).append(petal(year))
+        }
+        ink(0.18).setFill()
+        comingShape.fill()
+        strong.setFill()
+        goneShape.fill()
+        // this year's petal filling from its base
+        if gone < years && part > 0 {
+            ink(0.95).setFill()
+            petal(gone, upTo: part).fill()
+        }
+
+        // the seeds: each a golden angle on from the last, further out as they go
+        let seeds = 260
+        let golden = CGFloat.pi * (3 - CGFloat(5).squareRoot())
+        let seedSize = max(disc * 0.07, 1.5)
+        let field = NSBezierPath()
+        for i in 0 ..< seeds {
+            let r = (disc - seedSize) * (CGFloat(i) + 0.5).squareRoot() / CGFloat(seeds).squareRoot()
+            let angle = CGFloat(i) * golden
+            let p = NSPoint(x: centre.x + r * cos(angle), y: centre.y + r * sin(angle))
+            field.appendOval(in: NSRect(x: p.x - seedSize / 2, y: p.y - seedSize / 2, width: seedSize, height: seedSize))
+        }
+        ink(0.3).setFill()
+        field.fill()
+        let top = centre.y + radius
+        let step: CGFloat = 8
         let title = NSAttributedString(string: "MEMENTO MORI", attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
