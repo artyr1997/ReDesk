@@ -1875,7 +1875,6 @@ final class LockFace: NSView {
     var unlock: (_ asked: Bool) -> Void = { _ in }
     /// the screen with the calendar and UNLOCK (the others only show the wallpaper)
     let main: Bool
-    var asking = false { didSet { needsDisplay = true } }
     private var field: BirthdayField?
 
     /// a life of 90 years, a column each, 52 weeks down
@@ -1956,7 +1955,7 @@ final class LockFace: NSView {
         guard main else { return }
         drawLife()
         drawDiamond(at: corner, color: field != nil ? ink(0.95) : strong)
-        let hint = NSAttributedString(string: asking ? "TOUCH ID OR PASSWORD" : "UNLOCK", attributes: [
+        let hint = NSAttributedString(string: "UNLOCK", attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let h = hint.size()
@@ -2018,7 +2017,6 @@ final class LockScreen {
     private var faces: [LockFace] = []
     private var shownAt: Date?
     private var before: NSRunningApplication?
-    private var asking = false
     private var systemLocked = false
     /// Touch ID being waited for without the system's prompt
     private var touch: LAContext?
@@ -2050,7 +2048,7 @@ final class LockScreen {
 
     private func check() {
         if shown {
-            if !systemLocked, !asking, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
+            if !systemLocked, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
                 lockTheMac()
             }
             return
@@ -2178,36 +2176,10 @@ final class LockScreen {
         }
     }
 
-    /// UNLOCK clicked or Return: the system's prompt (Touch ID or the password), the screen stepping down
-    /// under it meanwhile. Any other key or click: only once Touch ID can't wait without it.
+    /// UNLOCK clicked or Return: the screen goes, no prompt asked. Any other key or click does nothing.
     private func unlock(asked: Bool) {
-        guard shown, !asking, asked || touch == nil else { return }
-        // the unseen Touch ID gives way to the prompt, and comes back if the prompt is cancelled
-        touch?.invalidate()
-        touch = nil
-        let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            // nothing to ask with (no password on the Mac): it just opens
-            return hide()
-        }
-        asking = true
-        faces.forEach { $0.asking = true }
-        windows.forEach { $0.level = .floating }
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "unlock the desk") { ok, _ in
-            DispatchQueue.main.async {
-                self.asking = false
-                self.faces.forEach { $0.asking = false }
-                if ok {
-                    self.hide()
-                } else {
-                    self.windows.forEach { $0.level = .screenSaver }
-                    NSApp.activate(ignoringOtherApps: true)
-                    self.windows.first?.makeKeyAndOrderFront(nil)
-                    self.waitForTouch()
-                }
-            }
-        }
+        guard shown, asked else { return }
+        hide()
     }
 
     func hide() {
