@@ -289,9 +289,12 @@ final class LiveWallpaper {
         YouTubeWallpaper.resolve(link) { [weak self] stream, live in
             guard let self, self.player === player else { return }
             guard let stream else {
-                // no answer now (offline, say): asked again in a minute
-                return self.watchStream(link, player, after: 60)
+                // no answer now (offline, or YouTube asking to confirm it's no bot): asked again later and
+                // later still, a minute, two, four… up to half an hour, so as not to be taken for one
+                self.misses += 1
+                return self.watchStream(link, player, after: min(60 * pow(2, Double(self.misses - 1)), 1800), waiting: true)
             }
+            self.misses = 0
             let item = AVPlayerItem(url: stream)
             self.looper = nil
             player.removeAllItems()
@@ -306,14 +309,18 @@ final class LiveWallpaper {
         }
     }
 
-    /// Asks YouTube again after `after` seconds, or sooner, at the minute, when the stream has failed or stopped.
-    private func watchStream(_ link: URL, _ player: AVQueuePlayer, after: TimeInterval) {
+    /// YouTube's answers missed in a row
+    private var misses = 0
+
+    /// Asks YouTube again after `after` seconds; while a stream plays, sooner, at the minute, when it has failed or
+    /// stopped (`waiting`: none yet, only the time counts).
+    private func watchStream(_ link: URL, _ player: AVQueuePlayer, after: TimeInterval, waiting: Bool = false) {
         watch?.invalidate()
         let due = Date().addingTimeInterval(after)
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] timer in
             guard let self, self.player === player else { return timer.invalidate() }
-            let failed = player.currentItem == nil || player.currentItem?.status == .failed
-                || (!self.frozen && !self.resting && player.timeControlStatus == .paused)
+            let failed = !waiting && (player.currentItem == nil || player.currentItem?.status == .failed
+                || (!self.frozen && !self.resting && player.timeControlStatus == .paused))
             if failed || Date() >= due {
                 timer.invalidate()
                 self.stream(link, into: player)
