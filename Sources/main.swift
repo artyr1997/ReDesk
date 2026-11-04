@@ -1569,7 +1569,7 @@ func drawBar(in rect: NSRect, filled: Double, vertical: Bool) {
 }
 
 /// Today, midnight to midnight, as a faint line with a mark at noon; a diamond stands at now.
-class DayView: DeskView {
+final class DayView: DeskView {
     override func draw(_ dirtyRect: NSRect) {
         let calendar = Calendar.current
         let now = Date()
@@ -1838,16 +1838,11 @@ final class DeskWindow: NSWindow {
 
 // ── the lock screen ──
 // ⌃⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
-// (a video one moving), the date and the day line — until Touch ID or the Mac's password
+// (a video one moving) — until Touch ID or the Mac's password
 // says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
 // still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
 
-/// The face: the date and UNLOCK in the apps' small letters, the day line under the date.
-/// The day line on the lock screen: only to look at (no menu of the desk's under a right click).
-final class LockDay: DayView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
+/// The face: only UNLOCK at the bottom, in the apps' small letters, over the wallpaper.
 final class LockWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -1855,7 +1850,7 @@ final class LockWindow: NSWindow {
 
 final class LockFace: NSView {
     var unlock: () -> Void = {}
-    /// the screen with the time (the others only show the wallpaper)
+    /// the screen with UNLOCK (the others only show the wallpaper)
     let main: Bool
     var asking = false { didSet { needsDisplay = true } }
 
@@ -1872,21 +1867,9 @@ final class LockFace: NSView {
     override func rightMouseDown(with event: NSEvent) { unlock() }
     override func keyDown(with event: NSEvent) { unlock() }
 
-    /// the middle of the face: where the date stands, the day line under it
-    var clockLine: CGFloat { bounds.midY + 12 }
-
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
-        let now = Date()
-        let day = DateFormatter()
-        day.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
         let small = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
-        let date = NSAttributedString(string: day.string(from: now).uppercased(), attributes: [
-            .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.8),
-        ])
-        let d = date.size()
-        date.draw(at: NSPoint(x: bounds.midX - d.width / 2, y: clockLine))
-
         let hint = NSAttributedString(string: asking ? "TOUCH ID OR PASSWORD" : "UNLOCK", attributes: [
             .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
@@ -1900,7 +1883,6 @@ final class LockScreen {
 
     private var windows: [LockWindow] = []
     private var faces: [LockFace] = []
-    private var clock: Timer?
     private var shownAt: Date?
     private var before: NSRunningApplication?
     private var asking = false
@@ -2007,12 +1989,6 @@ final class LockScreen {
             let face = LockFace(frame: bounds, main: screen == mainScreen)
             face.unlock = { [weak self] in self?.unlock() }
             container.addSubview(face)
-            if face.main {
-                // the day line under the date, as on the desk
-                let width = bounds.width * 0.24
-                let day = LockDay(frame: NSRect(x: bounds.midX - width / 2, y: face.clockLine - 34, width: width, height: 18))
-                face.addSubview(day)
-            }
             faces.append(face)
 
             window.contentView = container
@@ -2034,11 +2010,6 @@ final class LockScreen {
             context.duration = Crossfade.themeDuration
             windows.forEach { $0.animator().alphaValue = 1 }
         }
-        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
-            self?.faces.forEach { $0.needsDisplay = true; $0.subviews.forEach { $0.needsDisplay = true } }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        clock = timer
     }
 
     /// Touch ID, or the Mac's password; the screen steps down under the system's prompt meanwhile.
@@ -2070,8 +2041,6 @@ final class LockScreen {
 
     func hide() {
         guard shown else { return }
-        clock?.invalidate()
-        clock = nil
         NSApp.presentationOptions = []
         let going = windows
         windows = []
