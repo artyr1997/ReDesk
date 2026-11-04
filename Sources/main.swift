@@ -2113,9 +2113,9 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// the birthday diamond at the top, as far from it as UNLOCK is from the bottom; MEMENTO MORI under it
+    /// the birthday diamond a quarter of the screen down from the top; MEMENTO MORI under it
     private var corner: NSPoint {
-        NSPoint(x: bounds.midX, y: bounds.maxY - bounds.height * 0.0625 - 8)
+        NSPoint(x: bounds.midX, y: bounds.maxY - bounds.height * 0.25)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -2185,7 +2185,7 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// A life of 90 years as the day's line on the desk, MEMENTO MORI at the top: a faint line, a mark at its middle (45), and
+    /// A life of 90 years as the day's line on the desk, MEMENTO MORI over it, high up: a faint line, a mark at its middle (45), and
     /// the diamond at how far in. Without a birthday, no diamond.
     private func drawLife() {
         let width = bounds.width * 0.24
