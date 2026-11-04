@@ -151,15 +151,31 @@ enum Wallpapers {
     static var current: Int? {
         guard let screen = NSScreen.screens.first,
               let url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
+        // a YouTube one sets no picture: it is on while the desktop still has the one it came over
+        if let youtube = youtubeOn, url.lastPathComponent == UserDefaults.standard.string(forKey: youtubeOverKey) {
+            return youtube
+        }
         // by name: the same picture may have been set from the repo's folder rather than the app's
         let name = url.lastPathComponent
         return all.firstIndex { $0.lastPathComponent == name || still(of: $0).lastPathComponent == name }
+    }
+
+    /// the desktop's picture a YouTube wallpaper came over, while it is on
+    private static let youtubeOverKey = "youtubeOver"
+    /// the YouTube wallpaper last chosen in this appearance
+    private static var youtubeOn: Int? {
+        let chosen = UserDefaults.standard.string(forKey: chosenKey)
+        return all.firstIndex { $0.pathExtension == "youtube" && $0.lastPathComponent == chosen }
     }
 
     static func show(_ index: Int, fading duration: Double = Crossfade.duration) {
         guard all.indices.contains(index) else { return }
         let url = all[index]
         UserDefaults.standard.set(url.lastPathComponent, forKey: chosenKey)
+        if url.pathExtension == "youtube" {
+            let under = NSScreen.screens.first.flatMap { NSWorkspace.shared.desktopImageURL(for: $0) }
+            UserDefaults.standard.set(under?.lastPathComponent, forKey: youtubeOverKey)
+        }
         // what is on the desktop now stays over the new wallpaper a moment, then fades away
         let old = LiveWallpaper.shared.url != nil ? LiveWallpaper.shared.handOver() : (windows: Crossfade.cover(), video: [])
         defer { Crossfade.lift(old.windows, keeping: old.video, over: duration) }
