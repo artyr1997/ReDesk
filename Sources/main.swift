@@ -103,10 +103,30 @@ enum Wallpapers {
     private static let light = folder("Light")
     private static let dark = folder("Dark")
 
-    /// The wallpapers of the appearance the Mac is in (the other folder's while this one is empty).
+    /// Videos from YouTube (YouTubeWallpaper), in Application Support/ReDesk/YouTube: in both appearances,
+    /// after the folder's own, oldest first.
+    static let youtubeFolder: URL = {
+        let folder = stills.appendingPathComponent("YouTube", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+    private(set) static var youtube = youtubeVideos()
+    private static func youtubeVideos() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: youtubeFolder, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        func made(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
+        return files.filter { videos.contains($0.pathExtension.lowercased()) }.sorted { made($0) < made($1) }
+    }
+    /// Looks at the YouTube folder again (a video came or went), and lays the dots out again.
+    static func reload() {
+        youtube = youtubeVideos()
+        NotificationCenter.default.post(name: .wallpapersListed, object: nil)
+    }
+
+    /// The wallpapers of the appearance the Mac is in (the other folder's while this one is empty),
+    /// then those from YouTube.
     static var all: [URL] {
         let (mine, other) = Appearance.dark ? (dark, light) : (light, dark)
-        return mine.isEmpty ? other : mine
+        return (mine.isEmpty ? other : mine) + youtube
     }
 
     /// the wallpaper last chosen in each appearance
@@ -386,6 +406,8 @@ enum Crossfade {
 
 extension Notification.Name {
     static let wallpaperChanged = Notification.Name("ReDeskWallpaperChanged")
+    /// one more wallpaper, or one fewer: the dots are laid out again
+    static let wallpapersListed = Notification.Name("ReDeskWallpapersListed")
     /// tiling turned on or off, or another arrangement
     static let arrangementChanged = Notification.Name("ReDeskArrangementChanged")
 }
@@ -1282,6 +1304,17 @@ class DeskView: NSView {
         theme.keyEquivalentModifierMask = [.command, .shift]
         theme.target = self
         theme.state = Appearance.dark ? .on : .off
+        if let progress = YouTubeWallpaper.progress {
+            let item = menu.addItem(withTitle: "YouTube: \(progress)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+        } else {
+            let item = menu.addItem(withTitle: "Wallpaper from YouTube…", action: #selector(youtubeWallpaper), keyEquivalent: "")
+            item.target = self
+        }
+        if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
+            let item = menu.addItem(withTitle: "Remove This Wallpaper", action: #selector(removeWallpaper), keyEquivalent: "")
+            item.target = self
+        }
         let lock = menu.addItem(withTitle: "Lock Screen", action: #selector(lockScreen), keyEquivalent: "l")
         lock.keyEquivalentModifierMask = [.command, .control]
         lock.target = self
@@ -1296,6 +1329,10 @@ class DeskView: NSView {
     @objc private func toggleTiling() { Tiler.shared.on.toggle() }
 
     @objc private func lockScreen() { LockScreen.shared.show() }
+
+    @objc private func youtubeWallpaper() { YouTubeWallpaper.ask() }
+
+    @objc private func removeWallpaper() { YouTubeWallpaper.removeCurrent() }
 
     @objc private func toggleCursors() { InkCursors.on.toggle() }
 
@@ -1837,6 +1874,157 @@ final class DeskWindow: NSWindow {
 }
 
 
+
+// ── wallpapers from YouTube ──
+// A link pasted in (the right-click menu's Wallpaper from YouTube…): yt-dlp fetches its picture alone,
+// no sound, in the best quality up to 4K; a video AVFoundation can't play here (VP9, AV1) is turned into
+// HEVC by ffmpeg with the Mac's own encoder. It goes to Application Support/ReDesk/YouTube and onto the desk.
+// yt-dlp and ffmpeg come from Homebrew (brew install yt-dlp ffmpeg).
+
+enum YouTubeWallpaper {
+    /// what the download is doing, for the menu; nil while there is none
+    private(set) static var progress: String?
+
+    private static let paths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+
+    private static func tool(_ name: String) -> String? {
+        paths.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private static func looksLikeYouTube(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return t.hasPrefix("http") && (t.contains("youtube.com/") || t.contains("youtu.be/"))
+    }
+
+    /// Asks for the link, the clipboard's already in it when it is one.
+    static func ask() {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 380, height: 24))
+        field.placeholderString = "https://www.youtube.com/watch?v=…"
+        if let clip = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           looksLikeYouTube(clip) {
+            field.stringValue = clip
+        }
+        let alert = NSAlert()
+        alert.messageText = "Wallpaper from YouTube"
+        alert.informativeText = "Paste a link: the video comes in its best quality, without sound."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let link = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard looksLikeYouTube(link) else { return fail("That isn't a YouTube link.") }
+        download(link)
+    }
+
+    private static func fail(_ message: String) {
+        DispatchQueue.main.async {
+            progress = nil
+            let alert = NSAlert()
+            alert.messageText = "No wallpaper from YouTube"
+            alert.informativeText = message
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    /// Runs a tool, each line of its output handed to `line` as it comes; its status at the end.
+    @discardableResult
+    private static func run(_ path: String, _ arguments: [String], line: (String) -> Void = { _ in }) -> (status: Int32, output: String) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: path)
+        task.arguments = arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = (paths + [environment["PATH"] ?? ""]).joined(separator: ":")
+        task.environment = environment
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+        guard (try? task.run()) != nil else { return (-1, "") }
+        var all = "", pending = ""
+        let handle = pipe.fileHandleForReading
+        while true {
+            let data = handle.availableData
+            if data.isEmpty { break }
+            let text = String(decoding: data, as: UTF8.self)
+            all += text
+            pending += text
+            // progress comes as lines (--newline) or carriage returns
+            let parts = pending.components(separatedBy: CharacterSet(charactersIn: "\r\n"))
+            pending = parts.last ?? ""
+            parts.dropLast().filter { !$0.isEmpty }.forEach(line)
+        }
+        task.waitUntilExit()
+        return (task.terminationStatus, all)
+    }
+
+    private static func say(_ text: String) {
+        DispatchQueue.main.async { progress = text }
+    }
+
+    static func download(_ link: String) {
+        guard progress == nil else { return }
+        guard let ytdlp = tool("yt-dlp"), let ffmpeg = tool("ffmpeg"), let ffprobe = tool("ffprobe") else {
+            return fail("It takes yt-dlp and ffmpeg: brew install yt-dlp ffmpeg")
+        }
+        progress = "starting"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let work = FileManager.default.temporaryDirectory.appendingPathComponent("ReDesk-YouTube-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: work) }
+
+            // the picture alone, the best there is up to 4K (larger only costs, a screen shows no more)
+            let fetched = run(ytdlp, ["-f", "bv*[height<=2160]/bv*", "--no-playlist", "--newline", "--no-part",
+                                      "-o", work.appendingPathComponent("%(title).80B [%(id)s].%(ext)s").path, link]) { line in
+                if line.hasPrefix("[download]"), let percent = line.split(separator: " ").first(where: { $0.hasSuffix("%") }) {
+                    say("downloading \(percent)")
+                }
+            }
+            let files = (try? FileManager.default.contentsOfDirectory(at: work, includingPropertiesForKeys: nil)) ?? []
+            guard fetched.status == 0, let source = files.first else {
+                let reason = fetched.output.split(separator: "\n").last { $0.contains("ERROR") }.map(String.init)
+                return fail(reason ?? "yt-dlp couldn't get the video.")
+            }
+            let codec = run(ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name",
+                                      "-of", "csv=p=0", source.path]).output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = source.deletingPathExtension().lastPathComponent + ".mp4"
+            let out = work.appendingPathComponent("out.mp4")
+            var arguments = ["-y", "-i", source.path, "-an", "-movflags", "+faststart"]
+            if codec == "h264" {
+                arguments += ["-c:v", "copy"]
+            } else if codec == "hevc" {
+                arguments += ["-c:v", "copy", "-tag:v", "hvc1"]
+            } else {
+                // VP9 or AV1: HEVC by the Mac's encoder, generous enough for 4K
+                say("converting")
+                arguments += ["-c:v", "hevc_videotoolbox", "-b:v", "24M", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"]
+            }
+            guard run(ffmpeg, arguments + [out.path]).status == 0 else { return fail("ffmpeg couldn't make it playable.") }
+            let target = Wallpapers.youtubeFolder.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: target)
+            guard (try? FileManager.default.moveItem(at: out, to: target)) != nil else { return fail("It couldn't be kept.") }
+            DispatchQueue.main.async {
+                progress = nil
+                Wallpapers.reload()
+                if let index = Wallpapers.all.firstIndex(of: target) { Wallpapers.show(index) }
+            }
+        }
+    }
+
+    /// The YouTube video on the desk goes (its file and its still), and the desk takes the one before it.
+    static func removeCurrent() {
+        guard let index = Wallpapers.current else { return }
+        let url = Wallpapers.all[index]
+        guard Wallpapers.youtube.contains(url) else { return }
+        let count = Wallpapers.all.count
+        if count > 1 { Wallpapers.show(index > 0 ? index - 1 : 1) }
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: Wallpapers.still(of: url))
+        Wallpapers.reload()
+    }
+}
+
 // ── the lock screen ──
 // ⌃⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
 // (a video one moving) — until Touch ID or the Mac's password
@@ -2223,6 +2411,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         layout()
         NotificationCenter.default.addObserver(
             self, selector: #selector(layout), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(layout), name: .wallpapersListed, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(tick), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
