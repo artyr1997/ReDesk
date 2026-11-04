@@ -2379,6 +2379,23 @@ final class Desk: NSObject, NSApplicationDelegate {
     private lazy var stripWindow = DeskWindow(view: strip) { l in l.area }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // ReDesk shows no menu bar, but its fields (the YouTube link, the birthday) still want ⌘X ⌘C ⌘V ⌘A ⌘Z:
+        // key equivalents reach them through a main menu, so it has an Edit menu nobody sees
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let main = NSMenu()
+        main.addItem(NSMenuItem(title: "ReDesk", action: nil, keyEquivalent: ""))
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        editItem.submenu = edit
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+
         windows = corners.map { corner in
             DeskWindow(view: WordView(corner: corner)) { l in
                 let height = CGFloat(corner.word.count) * letterStep
