@@ -1253,7 +1253,7 @@ private func CGSRegisterCursorWithImages(
 private func CoreCursorUnregisterAll(_ cid: CGSConnectionID) -> CGError
 
 /// The Re apps' ink cursors for every app on the Mac: the arrow, the I-beam and the pointing hand drawn
-/// with a brush (light ink while the Mac is dark). They stay until ReDesk quits or they are turned off
+/// with a brush (light ink while the Mac is dark; the arrow always light, with a dark rim). They stay until ReDesk quits or they are turned off
 /// (right click › Ink Cursors); then the Mac's own come back.
 enum InkCursors {
     private struct Shape {
@@ -1262,13 +1262,15 @@ enum InkCursors {
         let night: String
         /// the point that clicks, in a 20 × 20 cursor
         let hotspot: CGPoint
+        /// a dark rim round it, so light ink reads on a light screen too
+        var rimmed = false
     }
 
     // since macOS 26 the arrow and the I-beam are drawn from the …S names; the old ones are still
     // accepted, without effect (Mousecape PR #308)
     private static let shapes = [
         Shape(names: ["com.apple.coregraphics.ArrowS", "com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowCtx"],
-              day: "cursor-arrow", night: "cursor-arrow-night", hotspot: CGPoint(x: 1, y: 1)),
+              day: "cursor-arrow-night", night: "cursor-arrow-night", hotspot: CGPoint(x: 1.5, y: 1.5), rimmed: true),
         Shape(names: ["com.apple.coregraphics.IBeamS", "com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamXOR"],
               day: "cursor-ibeam", night: "cursor-ibeam-night", hotspot: CGPoint(x: 10, y: 10)),
         // the hand has a white body inside its outline: it reads on both
@@ -1293,7 +1295,7 @@ enum InkCursors {
         }
         let night = Appearance.dark
         for shape in shapes {
-            guard let images = images(night ? shape.night : shape.day) else { continue }
+            guard let images = images(night ? shape.night : shape.day, rimmed: shape.rimmed) else { continue }
             for name in shape.names {
                 var seed: Int32 = 0
                 let error = name.withCString {
@@ -1309,7 +1311,7 @@ enum InkCursors {
     }
 
     /// The picture at each scale the screen may want (1×, 2×, 3×, 4×).
-    private static func images(_ name: String) -> [CGImage]? {
+    private static func images(_ name: String, rimmed: Bool = false) -> [CGImage]? {
         guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
@@ -1319,7 +1321,27 @@ enum InkCursors {
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
             ctx.interpolationQuality = .high
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            guard rimmed else {
+                ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+                return ctx.makeImage()
+            }
+            // the ink a little smaller, room left round it for the rim: its dark shape drawn all round it
+            let rim = CGFloat(side) * 0.04
+            let place = CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: rim, dy: rim)
+            guard let shade = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            shade.interpolationQuality = .high
+            shade.draw(image, in: place)
+            shade.setBlendMode(.sourceIn)
+            shade.setFillColor(CGColor(srgbRed: 0.08, green: 0.08, blue: 0.08, alpha: 0.9))
+            shade.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            guard let dark = shade.makeImage() else { return nil }
+            for step in 0..<16 {
+                let angle = CGFloat(step) / 16 * 2 * .pi
+                ctx.draw(dark, in: place.offsetBy(dx: cos(angle) * rim, dy: sin(angle) * rim))
+            }
+            ctx.draw(image, in: place)
             return ctx.makeImage()
         }
     }
