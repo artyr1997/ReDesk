@@ -2113,10 +2113,13 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// how far MEMENTO MORI sits over the life line
+    static let titleGap: CGFloat = 40
+
     /// the birthday diamond, over MEMENTO MORI
     private var corner: NSPoint {
         let title = NSAttributedString(string: "MEMENTO MORI", attributes: [.font: lockLetters]).size()
-        return NSPoint(x: bounds.midX, y: bounds.midY + 9 + 14 + title.height + 18)
+        return NSPoint(x: bounds.midX, y: bounds.midY + 9 + LockFace.titleGap + title.height + 18)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -2198,7 +2201,7 @@ final class LockFace: NSView {
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let t = title.size()
-        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: line.maxY + 14))
+        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: line.maxY + LockFace.titleGap))
         guard let birthday, let end = Calendar.current.date(byAdding: .year, value: LockFace.years, to: birthday) else { return }
         let gone = min(max(Date().timeIntervalSince(birthday) / end.timeIntervalSince(birthday), 0), 1)
         // kept inside the line so it is never cut at the ends
