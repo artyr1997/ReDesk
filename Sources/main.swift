@@ -2113,13 +2113,9 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// how far MEMENTO MORI sits over the life line
-    static let titleGap: CGFloat = 40
-
-    /// the birthday diamond, over MEMENTO MORI
+    /// the birthday diamond at the top, as far from it as UNLOCK is from the bottom; MEMENTO MORI under it
     private var corner: NSPoint {
-        let title = NSAttributedString(string: "MEMENTO MORI", attributes: [.font: lockLetters]).size()
-        return NSPoint(x: bounds.midX, y: bounds.midY + 9 + LockFace.titleGap + title.height + 18)
+        NSPoint(x: bounds.midX, y: bounds.maxY - bounds.height * 0.0625 - 8)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -2189,7 +2185,7 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// A life of 90 years as the day's line on the desk, MEMENTO MORI over it: a faint line, a mark at its middle (45), and
+    /// A life of 90 years as the day's line on the desk, MEMENTO MORI at the top: a faint line, a mark at its middle (45), and
     /// the diamond at how far in. Without a birthday, no diamond.
     private func drawLife() {
         let width = bounds.width * 0.24
@@ -2201,7 +2197,7 @@ final class LockFace: NSView {
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let t = title.size()
-        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: line.maxY + LockFace.titleGap))
+        title.draw(at: NSPoint(x: line.midX - t.width / 2 + 0.2 * 14, y: corner.y - 18 - t.height))
         guard let birthday, let end = Calendar.current.date(byAdding: .year, value: LockFace.years, to: birthday) else { return }
         let gone = min(max(Date().timeIntervalSince(birthday) / end.timeIntervalSince(birthday), 0), 1)
         // kept inside the line so it is never cut at the ends
