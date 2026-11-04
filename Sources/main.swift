@@ -1871,7 +1871,8 @@ final class LockWindow: NSWindow {
 }
 
 final class LockFace: NSView {
-    var unlock: () -> Void = {}
+    /// `asked`: UNLOCK clicked or Return pressed, which brings the system's prompt even while Touch ID waits
+    var unlock: (_ asked: Bool) -> Void = { _ in }
     /// the screen with the calendar and UNLOCK (the others only show the wallpaper)
     let main: Bool
     var asking = false { didSet { needsDisplay = true } }
@@ -1896,14 +1897,22 @@ final class LockFace: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard main else { return unlock() }
+        guard main else { return unlock(false) }
         let point = convert(event.locationInWindow, from: nil)
         if field != nil { return closeBirthday() }
         if hypot(point.x - corner.x, point.y - corner.y) < 18 { return openBirthday() }
-        unlock()
+        unlock(unlockPlace.contains(point))
     }
-    override func rightMouseDown(with event: NSEvent) { if field == nil { unlock() } }
-    override func keyDown(with event: NSEvent) { unlock() }
+    override func rightMouseDown(with event: NSEvent) { if field == nil { unlock(false) } }
+    override func keyDown(with event: NSEvent) {
+        let enter = event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter)
+        unlock(enter)
+    }
+
+    /// UNLOCK at the bottom, with room round it for the click
+    private var unlockPlace: NSRect {
+        NSRect(x: bounds.midX - 160, y: bounds.minY + bounds.height * 0.0625 - 16, width: 320, height: 52)
+    }
 
     private func openBirthday() {
         let field = BirthdayField(frame: .zero)
@@ -2114,7 +2123,7 @@ final class LockScreen {
             container.addSubview(veil)
 
             let face = LockFace(frame: bounds, main: screen == mainScreen)
-            face.unlock = { [weak self] in self?.unlock() }
+            face.unlock = { [weak self] asked in self?.unlock(asked: asked) }
             container.addSubview(face)
             faces.append(face)
 
@@ -2169,10 +2178,13 @@ final class LockScreen {
         }
     }
 
-    /// A key or a click: nothing while Touch ID waits; otherwise the system's prompt (Touch ID or the
-    /// password), the screen stepping down under it meanwhile.
-    private func unlock() {
-        guard shown, !asking, touch == nil else { return }
+    /// UNLOCK clicked or Return: the system's prompt (Touch ID or the password), the screen stepping down
+    /// under it meanwhile. Any other key or click: only once Touch ID can't wait without it.
+    private func unlock(asked: Bool) {
+        guard shown, !asking, asked || touch == nil else { return }
+        // the unseen Touch ID gives way to the prompt, and comes back if the prompt is cancelled
+        touch?.invalidate()
+        touch = nil
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
@@ -2192,6 +2204,7 @@ final class LockScreen {
                     self.windows.forEach { $0.level = .screenSaver }
                     NSApp.activate(ignoringOtherApps: true)
                     self.windows.first?.makeKeyAndOrderFront(nil)
+                    self.waitForTouch()
                 }
             }
         }
