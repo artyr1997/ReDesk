@@ -1842,7 +1842,28 @@ final class DeskWindow: NSWindow {
 // says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
 // still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
 
-/// The face: only UNLOCK at the bottom, in the apps' small letters, over the wallpaper.
+/// The face: a life in weeks (Memento Mori), UNLOCK at the bottom, and in the bottom left corner a small
+/// diamond that sets the birthday the weeks count from. Over the wallpaper, in the apps' small letters.
+let lockLetters = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
+
+/// The birthday the life calendar counts from, kept between launches.
+var birthday: Date? {
+    get { UserDefaults.standard.object(forKey: "birthday") as? Date }
+    set { UserDefaults.standard.set(newValue, forKey: "birthday") }
+}
+
+/// The birthday's field: Return or Escape puts it away.
+final class BirthdayField: NSDatePicker {
+    var done: () -> Void = {}
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_Escape) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) {
+            done()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
 final class LockWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -1850,9 +1871,13 @@ final class LockWindow: NSWindow {
 
 final class LockFace: NSView {
     var unlock: () -> Void = {}
-    /// the screen with UNLOCK (the others only show the wallpaper)
+    /// the screen with the calendar and UNLOCK (the others only show the wallpaper)
     let main: Bool
     var asking = false { didSet { needsDisplay = true } }
+    private var field: BirthdayField?
+
+    /// a life of 90 years, a row each, 52 weeks across
+    static let years = 90, weeks = 52
 
     init(frame: NSRect, main: Bool) {
         self.main = main
@@ -1863,18 +1888,114 @@ final class LockFace: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { unlock() }
-    override func rightMouseDown(with event: NSEvent) { unlock() }
+
+    /// the corner diamond, where FILE's column meets the bottom words' line on the desk
+    private var corner: NSPoint {
+        NSPoint(x: bounds.minX + bounds.width * 0.05, y: bounds.minY + bounds.height * 0.0625 + 8)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard main else { return unlock() }
+        let point = convert(event.locationInWindow, from: nil)
+        if field != nil { return closeBirthday() }
+        if hypot(point.x - corner.x, point.y - corner.y) < 18 { return openBirthday() }
+        unlock()
+    }
+    override func rightMouseDown(with event: NSEvent) { if field == nil { unlock() } }
     override func keyDown(with event: NSEvent) { unlock() }
+
+    private func openBirthday() {
+        let field = BirthdayField(frame: .zero)
+        field.datePickerStyle = .textField
+        field.datePickerElements = .yearMonthDay
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.textColor = ink(0.95)
+        field.font = lockLetters
+        field.maxDate = Date()
+        field.dateValue = birthday ?? Calendar.current.date(from: DateComponents(year: 1995, month: 1, day: 1)) ?? Date()
+        field.target = self
+        field.action = #selector(birthdayChanged(_:))
+        field.done = { [weak self] in self?.closeBirthday() }
+        field.sizeToFit()
+        field.setFrameOrigin(NSPoint(x: corner.x + 18, y: corner.y - field.frame.height / 2))
+        addSubview(field)
+        window?.makeFirstResponder(field)
+        self.field = field
+        // set at once, so the weeks show while the date is being typed
+        birthday = field.dateValue
+        needsDisplay = true
+    }
+
+    @objc private func birthdayChanged(_ sender: NSDatePicker) {
+        birthday = sender.dateValue
+        needsDisplay = true
+    }
+
+    private func closeBirthday() {
+        guard let field else { return }
+        birthday = field.dateValue
+        field.removeFromSuperview()
+        self.field = nil
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
-        let small = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
+        drawLife()
+        drawDiamond(at: corner, color: field != nil ? ink(0.95) : strong)
         let hint = NSAttributedString(string: asking ? "TOUCH ID OR PASSWORD" : "UNLOCK", attributes: [
-            .font: small, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
+            .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let h = hint.size()
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
+    }
+
+    /// Every week of a life of 90 years, a row a year: the weeks gone in the strong ink, this one
+    /// in full, those to come faint. Without a birthday, all of them to come.
+    private func drawLife() {
+        let rows = LockFace.years, columns = LockFace.weeks
+        // the middle of the screen, between the top and UNLOCK
+        let room = NSRect(x: bounds.minX, y: bounds.minY + bounds.height * 0.14,
+                          width: bounds.width, height: bounds.height * 0.74)
+        // a cell's step, a little wider gap every ten years
+        let step = floor(min(room.height / (CGFloat(rows) + 8), room.width * 0.5 / CGFloat(columns)) * 2) / 2
+        let dot = max(step * 0.62, 1.5)
+        let width = CGFloat(columns) * step
+        let height = CGFloat(rows) * step + CGFloat(rows / 10 - 1) * step * 0.8
+        let left = floor(room.midX - width / 2), top = floor(room.midY + height / 2)
+
+        let calendar = Calendar.current
+        let now = Date()
+        let gone = NSBezierPath(), current = NSBezierPath(), coming = NSBezierPath()
+        for row in 0 ..< rows {
+            let start = birthday.flatMap { calendar.date(byAdding: .year, value: row, to: $0) }
+            let next = birthday.flatMap { calendar.date(byAdding: .year, value: row + 1, to: $0) }
+            let y = top - CGFloat(row + 1) * step - CGFloat(row / 10) * step * 0.8
+            for column in 0 ..< columns {
+                let rect = NSRect(x: left + CGFloat(column) * step + (step - dot) / 2, y: y + (step - dot) / 2, width: dot, height: dot)
+                let path: NSBezierPath
+                if let start, let weekStart = calendar.date(byAdding: .day, value: column * 7, to: start) {
+                    // the year's last week runs to the next birthday
+                    let weekEnd = column == columns - 1 ? (next ?? weekStart) : calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+                    path = weekEnd <= now ? gone : weekStart <= now ? current : coming
+                } else {
+                    path = coming
+                }
+                path.appendRoundedRect(rect, xRadius: dot * 0.25, yRadius: dot * 0.25)
+            }
+        }
+        ink(0.18).setFill(); coming.fill()
+        strong.setFill(); gone.fill()
+        ink(0.95).setFill(); current.fill()
+
+        let title = NSAttributedString(string: "MEMENTO MORI", attributes: [
+            .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
+        ])
+        let t = title.size()
+        title.draw(at: NSPoint(x: room.midX - t.width / 2, y: top + step * 2))
     }
 }
 
