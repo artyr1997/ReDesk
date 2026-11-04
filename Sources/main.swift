@@ -1989,9 +1989,9 @@ final class LockFace: NSView {
                 path.appendRoundedRect(rect, xRadius: dot * 0.25, yRadius: dot * 0.25)
             }
         }
-        ink(0.18).setFill(); coming.fill()
-        strong.setFill(); gone.fill()
-        ink(0.95).setFill(); current.fill()
+        ink(0.08).setFill(); coming.fill()
+        ink(0.28).setFill(); gone.fill()
+        ink(0.7).setFill(); current.fill()
 
         let title = NSAttributedString(string: "MEMENTO MORI", attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
