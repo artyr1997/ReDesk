@@ -18,6 +18,7 @@ import IOKit.ps
 import IOKit.pwr_mgt
 import LocalAuthentication
 import LocalAuthenticationEmbeddedUI
+import Network
 import ServiceManagement
 
 struct Corner {
@@ -254,7 +255,7 @@ final class LiveWallpaper {
     var frozen = UserDefaults.standard.bool(forKey: "wallpaperFrozen") {
         didSet {
             UserDefaults.standard.set(frozen, forKey: "wallpaperFrozen")
-            if frozen { player?.pause() } else { player?.play() }
+            if frozen { player?.pause(); remux?.pause() } else { player?.play(); remuxAgain() }
         }
     }
 
@@ -286,7 +287,7 @@ final class LiveWallpaper {
 
     /// A YouTube video straight from YouTube: a live one as it goes, any other round and round.
     private func stream(_ link: URL, into player: AVQueuePlayer) {
-        YouTubeWallpaper.resolve(link) { [weak self] stream, live, headers in
+        YouTubeWallpaper.resolve(link) { [weak self] stream in
             guard let self, self.player === player else { return }
             guard let stream else {
                 // no answer now (offline, or YouTube asking to confirm it's no bot): asked again later and
@@ -295,33 +296,87 @@ final class LiveWallpaper {
                 return self.watchStream(link, player, after: min(60 * pow(2, Double(self.misses - 1)), 1800), waiting: true)
             }
             self.misses = 0
-            let item = AVPlayerItem(asset: AVURLAsset(url: stream, options: ["AVURLAssetHTTPHeaderFieldsKey": headers]))
-            self.looper = nil
-            if let ended = self.ended { NotificationCenter.default.removeObserver(ended) }
-            self.ended = nil
-            player.removeAllItems()
-            player.insert(item, after: nil)
-            if !live {
-                // round and round: AVPlayerLooper doesn't take a stream, so back to the start at its end
-                player.actionAtItemEnd = .none
-                self.ended = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
-                                                                    object: item, queue: .main) { [weak player] _ in
-                    player?.seek(to: .zero)
-                }
-            }
-            if !self.frozen && !self.resting { player.play() }
-            YouTubeWallpaper.note("\(link.deletingPathExtension().lastPathComponent): stream from \(stream.host ?? "?")\(live ? ", live" : "")")
-            // how it went, a little later
-            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak player] in
-                guard let player, let item = player.currentItem else { return YouTubeWallpaper.note("  no item after 20 s") }
-                let event = item.accessLog()?.events.last
-                YouTubeWallpaper.note("  after 20 s: item \(item.status.rawValue), \(player.timeControlStatus.rawValue) \(player.reasonForWaitingToPlay?.rawValue ?? ""), "
-                    + "\(Int(item.presentationSize.width))×\(Int(item.presentationSize.height)), \(Int(event?.numberOfBytesTransferred ?? 0) / 1000) kB"
-                    + (item.error.map { ", error \($0.localizedDescription)" } ?? "")
-                    + (item.errorLog()?.events.last.map { ", log \($0.errorStatusCode) \($0.errorComment ?? "") at \(($0.uri ?? "?").prefix(70))" } ?? ""))
+            YouTubeWallpaper.note("\(link.deletingPathExtension().lastPathComponent): stream from \(stream.url.host ?? "?")"
+                + (stream.live ? ", live" : "") + (stream.remux ? ", through ffmpeg" : ""))
+            if stream.remux {
+                self.remuxed(stream, link, player)
+            } else {
+                self.remux?.stop()
+                self.remux = nil
+                let asset = AVURLAsset(url: stream.url, options: ["AVURLAssetHTTPHeaderFieldsKey": stream.headers])
+                self.show(AVPlayerItem(asset: asset), in: player, looping: !stream.live)
             }
             // YouTube's links last some six hours: a fresh one well before
             self.watchStream(link, player, after: 4 * 3600)
+        }
+    }
+
+    /// the YouTube video ffmpeg passes on, when it comes so
+    private var remux: Remux?
+
+    /// The VP9 video through ffmpeg, from where the one before was (the same video with an older link, or paused),
+    /// its files served on this Mac; once a few seconds of it are there, played as a live stream.
+    private func remuxed(_ stream: YouTubeWallpaper.Stream, _ link: URL, _ player: AVQueuePlayer) {
+        let old = remux
+        let at = old?.position ?? 0
+        old?.pause()
+        let remux = Remux(stream, at: at)
+        remux.failed = { [weak self, weak remux] in
+            // the link likely out of date: a fresh one, on from here
+            guard let self, let remux, self.remux === remux, self.player === player else { return }
+            self.stream(link, into: player)
+        }
+        self.remux = remux
+        if frozen || resting { return }
+        remux.run()
+        LocalFiles.shared.start { [weak self] port in
+            guard let self, self.remux === remux, self.player === player else { return }
+            guard let port else { return YouTubeWallpaper.note("  no local server") }
+            self.whenReady(remux, waited: 0) {
+                old?.stop()
+                guard let url = URL(string: "http://127.0.0.1:\(port)/\(remux.name)/live.m3u8") else { return }
+                self.show(AVPlayerItem(url: url), in: player, looping: false)
+            }
+        }
+    }
+
+    private func whenReady(_ remux: Remux, waited: Double, then go: @escaping () -> Void) {
+        guard self.remux === remux else { return }
+        if remux.ready || waited > 30 { return go() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.whenReady(remux, waited: waited + 0.5, then: go)
+        }
+    }
+
+    /// After a pause (⌘⇧M, the displays asleep): ffmpeg goes on from where it stopped.
+    private func remuxAgain() {
+        guard let remux, !remux.running, let link = url, let player, !frozen, !resting else { return }
+        remuxed(remux.stream, link, player)
+    }
+
+    private func show(_ item: AVPlayerItem, in player: AVQueuePlayer, looping: Bool) {
+        looper = nil
+        if let ended { NotificationCenter.default.removeObserver(ended) }
+        ended = nil
+        player.removeAllItems()
+        player.insert(item, after: nil)
+        if looping {
+            // round and round: AVPlayerLooper doesn't take a stream, so back to the start at its end
+            player.actionAtItemEnd = .none
+            ended = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
+                                                           object: item, queue: .main) { [weak player] _ in
+                player?.seek(to: .zero)
+            }
+        }
+        if !frozen && !resting { player.play() }
+        // how it went, a little later
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak player] in
+            guard let player, let item = player.currentItem else { return YouTubeWallpaper.note("  no item after 20 s") }
+            let event = item.accessLog()?.events.last
+            YouTubeWallpaper.note("  after 20 s: item \(item.status.rawValue), \(player.timeControlStatus.rawValue) \(player.reasonForWaitingToPlay?.rawValue ?? ""), "
+                + "\(Int(item.presentationSize.width))×\(Int(item.presentationSize.height)), \(Int(event?.numberOfBytesTransferred ?? 0) / 1000) kB"
+                + (item.error.map { ", error \($0.localizedDescription)" } ?? "")
+                + (item.errorLog()?.events.last.map { ", log \($0.errorStatusCode) \($0.errorComment ?? "") at \(($0.uri ?? "?").prefix(70))" } ?? ""))
         }
     }
 
@@ -351,6 +406,8 @@ final class LiveWallpaper {
     func stop() {
         watch?.invalidate()
         watch = nil
+        remux?.stop()
+        remux = nil
         if let ended { NotificationCenter.default.removeObserver(ended) }
         ended = nil
         player?.pause()
@@ -392,8 +449,8 @@ final class LiveWallpaper {
 
     /// the displays asleep
     private var resting = false
-    func pause() { resting = true; player?.pause() }
-    func resume() { resting = false; if !frozen { player?.play() } }
+    func pause() { resting = true; player?.pause(); remux?.pause() }
+    func resume() { resting = false; if !frozen { player?.play(); remuxAgain() } }
 
     func layout() {
         windows.forEach { $0.orderOut(nil) }
@@ -2016,6 +2073,164 @@ final class DeskWindow: NSWindow {
 
 
 // ── wallpapers from YouTube ──
+/// A small web server for this Mac alone, on 127.0.0.1, for the remuxed YouTube streams' files: AVFoundation
+/// plays HLS over HTTP only.
+final class LocalFiles {
+    static let shared = LocalFiles()
+    let folder: URL = {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ReDesk-YouTube", isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+    private(set) var port: UInt16?
+    private var listener: NWListener?
+    private var waiting: [(UInt16?) -> Void] = []
+    private let queue = DispatchQueue(label: "ReDesk.files")
+
+    /// Starts it once, then `done(port)` on the main thread (nil if it couldn't).
+    func start(_ done: @escaping (UInt16?) -> Void) {
+        if let port { return done(port) }
+        waiting.append(done)
+        guard listener == nil else { return }
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        guard let listener = try? NWListener(using: parameters) else { return answer(nil) }
+        listener.newConnectionHandler = { [weak self] connection in self?.serve(connection) }
+        listener.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready: DispatchQueue.main.async { self?.port = listener.port?.rawValue; self?.answer(self?.port) }
+            case .failed, .cancelled: DispatchQueue.main.async { self?.listener = nil; self?.port = nil; self?.answer(nil) }
+            default: break
+            }
+        }
+        self.listener = listener
+        listener.start(queue: queue)
+    }
+
+    private func answer(_ port: UInt16?) {
+        let all = waiting
+        waiting = []
+        all.forEach { $0(port) }
+    }
+
+    /// One GET, one file (only from the folder), then the connection closes.
+    private func serve(_ connection: NWConnection) {
+        connection.start(queue: queue)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [folder] data, _, _, _ in
+            let request = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
+            let words = request.split(separator: "\r\n").first?.split(separator: " ") ?? []
+            var body: Data?
+            var type = "application/octet-stream"
+            if words.count >= 2, words[0] == "GET" {
+                let parts = words[1].split(separator: "?")[0].split(separator: "/").map(String.init)
+                if !parts.isEmpty, !parts.contains(where: { $0 == ".." || $0.hasPrefix(".") }) {
+                    let file = parts.reduce(folder) { $0.appendingPathComponent($1) }
+                    body = try? Data(contentsOf: file)
+                    switch file.pathExtension {
+                    case "m3u8": type = "application/vnd.apple.mpegurl"
+                    case "mp4", "m4s": type = "video/mp4"
+                    default: break
+                    }
+                }
+            }
+            let head = body == nil
+                ? "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                : "HTTP/1.1 200 OK\r\nContent-Type: \(type)\r\nContent-Length: \(body!.count)\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data(head.utf8) + (body ?? Data()), completion: .contentProcessed { _ in connection.cancel() })
+        }
+    }
+}
+
+/// A YouTube VP9 video passed on by ffmpeg as HLS (fMP4, as it comes, nothing re-encoded), into a folder of
+/// LocalFiles: a few seconds of it there at a time, round and round (at the end it starts again, after a
+/// discontinuity). It goes when paused; `position` is where to take it up again.
+final class Remux {
+    let name = UUID().uuidString
+    var folder: URL { LocalFiles.shared.folder.appendingPathComponent(name, isDirectory: true) }
+    let stream: YouTubeWallpaper.Stream
+    /// ffmpeg stopped of itself, not at the end: the link is likely out of date
+    var failed: (() -> Void)?
+    private var task: Process?
+    private var from: Double = 0
+    private var since = Date()
+
+    init(_ stream: YouTubeWallpaper.Stream, at: Double) {
+        self.stream = stream
+        from = at
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    var position: Double {
+        guard task != nil else { return from }
+        let at = from + Date().timeIntervalSince(since)
+        return stream.duration > 1 ? at.truncatingRemainder(dividingBy: stream.duration) : at
+    }
+
+    var running: Bool { task != nil }
+
+    /// a few segments in, enough for AVFoundation to start with
+    var ready: Bool {
+        let list = (try? String(contentsOf: folder.appendingPathComponent("live.m3u8"), encoding: .utf8)) ?? ""
+        return list.components(separatedBy: "#EXTINF").count > 3
+    }
+
+    /// From `position` on.
+    func run() {
+        guard let ffmpeg = YouTubeWallpaper.ffmpeg else { return }
+        let at = from
+        since = Date()
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: ffmpeg)
+        var arguments = ["-nostdin", "-loglevel", "error"]
+        if at > 1 { arguments += ["-ss", String(format: "%.1f", at)] }
+        arguments += [
+            // as fast as it plays (a few seconds ahead at first): no more of it is fetched than is seen
+            "-readrate", "1", "-readrate_initial_burst", "6",
+            "-headers", stream.headers.map { "\($0.key): \($0.value)\r\n" }.joined(),
+            "-i", stream.url.absoluteString,
+            "-map", "0:v:0", "-c", "copy",
+            "-f", "hls", "-hls_segment_type", "fmp4", "-hls_time", "2", "-hls_list_size", "15",
+            "-hls_flags", "delete_segments+omit_endlist+append_list+discont_start+independent_segments",
+            folder.appendingPathComponent("live.m3u8").path,
+        ]
+        task.arguments = arguments
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        task.terminationHandler = { [weak self] ended in
+            DispatchQueue.main.async { self?.ended(ended) }
+        }
+        guard (try? task.run()) != nil else { return }
+        self.task = task
+    }
+
+    private func ended(_ ended: Process) {
+        guard ended === task else { return }
+        from = position
+        task = nil
+        if ended.terminationReason == .exit && ended.terminationStatus == 0 {
+            // the end: round again, from the start
+            from = 0
+            run()
+        } else {
+            YouTubeWallpaper.note("  ffmpeg stopped (\(ended.terminationStatus))")
+            failed?()
+        }
+    }
+
+    func pause() {
+        from = position
+        let running = task
+        task = nil
+        running?.terminate()
+    }
+
+    func stop() {
+        pause()
+        try? FileManager.default.removeItem(at: folder)
+    }
+}
+
 // A link pasted in (the right-click menu's Wallpaper from YouTube…) is kept, not the video: a .youtube file
 // with the link in Application Support/ReDesk/YouTube (no picture of the video: the wallpaper before stays until the stream moves). Shown, yt-dlp
 // asks YouTube where the stream is: the picture alone (no sound), the best there is up to 4K, and the video
@@ -2132,27 +2347,47 @@ enum YouTubeWallpaper {
     /// The best picture YouTube streams (HLS, which AVFoundation plays as it comes), up to 4K, never AV1
     /// (a Mac without its decoder can't play it); any HLS stream if there is no picture alone.
     private static let format = "bv*[protocol^=m3u8][height<=2160][vcodec!^=av01]/bv*[protocol^=m3u8][vcodec!^=av01]/b[protocol^=m3u8]"
+    /// With ffmpeg: HLS when it is 4K already, else YouTube's VP9 file over 1080p when there is one (not for a
+    /// live video, which has none), else as above.
+    private static let formatRemuxing = "bv*[protocol^=m3u8][height>=2160][vcodec!^=av01]/bv*[protocol=https][vcodec^=vp9][height>1080][height<=2160]/" + format
 
-    /// Where a .youtube file's video streams from now, and whether it is live. On the main thread; nil
-    /// when YouTube didn't say.
-    /// The headers go with it: YouTube gives the stream to the one it gave the link to (403 to anyone else).
-    static func resolve(_ file: URL, then done: @escaping (URL?, Bool, [String: String]) -> Void) {
+    /// Where a .youtube file's video streams from now: HLS that AVFoundation plays as it is, or (`remux`) the
+    /// picture alone as a file, VP9 in WebM, which ffmpeg passes on as HLS (YouTube streams HLS up to 1080p for
+    /// most videos, its 1440p and 4K come only so). `headers`: YouTube gives the video to the one it gave the
+    /// link to (403 to anyone else).
+    struct Stream {
+        let url: URL
+        let live: Bool
+        let headers: [String: String]
+        let remux: Bool
+        let duration: Double
+    }
+
+    static var ffmpeg: String? { tool("ffmpeg") }
+
+    /// On the main thread; nil when YouTube didn't say.
+    static func resolve(_ file: URL, then done: @escaping (Stream?) -> Void) {
         guard let ytdlp = tool("yt-dlp"),
               let link = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        else { return done(nil, false, [:]) }
+        else { return done(nil) }
+        let choice = ffmpeg == nil ? format : formatRemuxing
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = ask(ytdlp, ["-f", format, "--no-playlist", "--print", "is_live", "--print", "url",
-                                     "--print", "%(http_headers)j", "--print", "%(format_id)s %(height)sp %(vcodec)s",
-                                     "--print", "%(available_at|0)s", link])
+            let result = ask(ytdlp, ["-f", choice, "--no-playlist", "--print", "is_live", "--print", "url",
+                                     "--print", "%(http_headers)j", "--print", "%(format_id)s %(height)sp %(vcodec)s %(protocol)s",
+                                     "--print", "%(available_at|0)s", "--print", "%(duration|0)s", link])
             let lines = result.output.split(separator: "\n").map(String.init)
-            let stream = result.status == 0 && lines.count >= 2 ? URL(string: lines[1]) : nil
-            let headers = lines.count >= 3
-                ? (try? JSONSerialization.jsonObject(with: Data(lines[2].utf8))) as? [String: String] ?? [:] : [:]
-            if stream != nil, lines.count >= 4 { note("  format \(lines[3])") }
+            guard result.status == 0, lines.count >= 6, let url = URL(string: lines[1]) else {
+                return DispatchQueue.main.async { done(nil) }
+            }
+            let headers = (try? JSONSerialization.jsonObject(with: Data(lines[2].utf8))) as? [String: String] ?? [:]
+            note("  format \(lines[3])")
+            let stream = Stream(url: url, live: lines[0] == "True", headers: headers,
+                                remux: lines[3].hasSuffix(" https"),
+                                duration: Double(lines[5]) ?? 0)
             // YouTube gives the video only some seconds after the link (403 till then), as yt-dlp waits too
-            let at = lines.count >= 5 ? Double(lines[4]) ?? 0 : 0
+            let at = Double(lines[4]) ?? 0
             let wait = min(max(at - Date().timeIntervalSince1970 + 0.5, 0), 30)
-            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { done(stream, lines.first == "True", headers) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { done(stream) }
         }
     }
 
