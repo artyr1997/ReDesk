@@ -14,6 +14,7 @@ import AVFoundation
 import Carbon.HIToolbox
 import CoreAudio
 import ImageIO
+import IOKit.hid
 import IOKit.ps
 import IOKit.pwr_mgt
 import LocalAuthentication
@@ -1497,6 +1498,11 @@ class DeskView: NSView {
         let cursors = menu.addItem(withTitle: "Ink Cursors", action: #selector(toggleCursors), keyEquivalent: "")
         cursors.target = self
         cursors.state = InkCursors.on ? .on : .off
+        if LidLight.shared.available {
+            let lid = menu.addItem(withTitle: "Brightness by Lid", action: #selector(toggleLidLight), keyEquivalent: "")
+            lid.target = self
+            lid.state = LidLight.shared.on ? .on : .off
+        }
         let theme = menu.addItem(withTitle: "Dark Appearance", action: #selector(toggleAppearance), keyEquivalent: "t")
         theme.keyEquivalentModifierMask = [.command, .shift]
         theme.target = self
@@ -1532,6 +1538,8 @@ class DeskView: NSView {
     @objc private func removeWallpaper() { YouTubeWallpaper.removeCurrent() }
 
     @objc private func toggleCursors() { InkCursors.on.toggle() }
+
+    @objc private func toggleLidLight() { LidLight.shared.on.toggle() }
 
     @objc private func toggleAppearance() { Appearance.toggle() }
 
@@ -2765,9 +2773,124 @@ final class LockScreen {
     }
 }
 
+/// The screen's brightness follows the lid: open (from about 100°) it is the brightness the user chose,
+/// closing it dims the screen down to nearly dark at 20°. The angle comes from the hinge's sensor (a HID
+/// sensor of Apple's, 0x05AC:0x8104, on the MacBooks that have one), the brightness goes through
+/// DisplayServices; neither is public. Set by hand (the keys, Control Center, auto-brightness), the
+/// brightness becomes the new open one.
+final class LidLight {
+    static let shared = LidLight()
+
+    var on: Bool {
+        get { UserDefaults.standard.object(forKey: "lidLight") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "lidLight"); newValue ? start() : stop() }
+    }
+
+    private typealias Get = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
+    private typealias Set_ = @convention(c) (CGDirectDisplayID, Float) -> Int32
+    private var getBrightness: Get?
+    private var setBrightness: Set_?
+    private var sensor: IOHIDDevice?
+    private var manager: IOHIDManager?
+    private var timer: Timer?
+    private var lastAngle: Double?
+    /// the brightness with the lid open
+    private var base: Float?
+    private var lastSet: Float?
+    private var setAt = Date.distantPast
+
+    var available: Bool { open() }
+
+    private init() {
+        if let h = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW) {
+            if let f = dlsym(h, "DisplayServicesGetBrightness") { getBrightness = unsafeBitCast(f, to: Get.self) }
+            if let f = dlsym(h, "DisplayServicesSetBrightness") { setBrightness = unsafeBitCast(f, to: Set_.self) }
+        }
+    }
+
+    @discardableResult private func open() -> Bool {
+        if sensor != nil { return true }
+        guard getBrightness != nil, setBrightness != nil else { return false }
+        let m = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        IOHIDManagerSetDeviceMatching(m, [kIOHIDVendorIDKey: 0x05AC, kIOHIDProductIDKey: 0x8104,
+                                          kIOHIDPrimaryUsagePageKey: 0x20, kIOHIDPrimaryUsageKey: 0x8A] as CFDictionary)
+        guard IOHIDManagerOpen(m, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
+              let device = (IOHIDManagerCopyDevices(m) as? Set<IOHIDDevice>)?.first else { return false }
+        manager = m
+        sensor = device
+        return true
+    }
+
+    /// degrees, 0 closed
+    private func angle() -> Double? {
+        guard let sensor else { return nil }
+        var report = [UInt8](repeating: 0, count: 8)
+        var length = CFIndex(report.count)
+        guard IOHIDDeviceGetReport(sensor, kIOHIDReportTypeFeature, 1, &report, &length) == kIOReturnSuccess, length >= 3 else { return nil }
+        return Double(Int(report[1]) | Int(report[2]) << 8)
+    }
+
+    private var display: CGDirectDisplayID {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 8)
+        var count: UInt32 = 0
+        CGGetOnlineDisplayList(8, &ids, &count)
+        return ids.prefix(Int(count)).first { CGDisplayIsBuiltin($0) != 0 } ?? CGMainDisplayID()
+    }
+
+    private func brightness() -> Float? {
+        var value: Float = 0
+        guard let getBrightness, getBrightness(display, &value) == 0 else { return nil }
+        return value
+    }
+
+    /// how much of the open brightness at this angle: 0 at 20°, all of it from 100°, eased between
+    private func share(_ angle: Double) -> Float {
+        let t = min(max((angle - 20) / 80, 0), 1)
+        return Float(t * t * (3 - 2 * t))
+    }
+
+    func start() {
+        guard on, timer == nil, open() else { return }
+        lastAngle = nil
+        base = nil
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.step() }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        // the user's brightness back
+        if let base, let setBrightness { _ = setBrightness(display, base) }
+        base = nil
+    }
+
+    private func step() {
+        guard let angle = angle(), let now = brightness() else { return }
+        let share = share(angle)
+        if base == nil {
+            base = share > 0.25 ? min(1, now / share) : now
+            lastSet = now
+        } else if let lastSet, abs(lastSet - now) > 0.02, Date().timeIntervalSince(setAt) > 1,
+                  share > 0.25, CGDisplayIsAsleep(display) == 0 {
+            // changed by something else (and not mid-way through a change of ours): what the user wants
+            base = min(1, now / share)
+            self.lastSet = now
+        }
+        defer { lastAngle = angle }
+        guard let last = lastAngle, abs(angle - last) >= 1, let base, let setBrightness else { return }
+        let target = max(0.01, base * share)
+        guard abs(target - now) > 0.004 else { return }
+        if setBrightness(display, target) == 0 {
+            lastSet = target
+            setAt = Date()
+        }
+    }
+}
+
 final class Desk: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         InkCursors.restore()
+        LidLight.shared.stop()
     }
 
     private let wallpapers = WallpaperView()
@@ -2860,6 +2983,7 @@ final class Desk: NSObject, NSApplicationDelegate {
             self?.appearanceTurned()
         }
         CommandKeys.install()
+        LidLight.shared.start()
     }
 
     private var night = false
