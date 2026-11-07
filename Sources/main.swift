@@ -2480,9 +2480,9 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// the birthday diamond, just over UNLOCK
+    /// the birthday diamond, just under the life line
     private var corner: NSPoint {
-        NSPoint(x: bounds.midX, y: bounds.minY + bounds.height * 0.0625 + 36)
+        NSPoint(x: bounds.midX, y: bounds.midY - 9 - 24)
     }
 
     override func mouseDown(with event: NSEvent) {
