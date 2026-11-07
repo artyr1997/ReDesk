@@ -2793,10 +2793,8 @@ final class LidLight {
     private var sensor: IOHIDDevice?
     private var manager: IOHIDManager?
     private var timer: Timer?
-    private var lastAngle: Double?
     /// the brightness with the lid open
     private var base: Float?
-    private var lastSet: Float?
     private var setAt = Date.distantPast
 
     var available: Bool { open() }
@@ -2851,9 +2849,10 @@ final class LidLight {
 
     func start() {
         guard on, timer == nil, open() else { return }
-        lastAngle = nil
+        smooth = nil
+        shown = nil
         base = nil
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.step() }
+        pace(fast: false)
     }
 
     func stop() {
@@ -2864,24 +2863,47 @@ final class LidLight {
         base = nil
     }
 
+    /// 60 times a second while the lid or the brightness moves, 10 while all is still
+    private func pace(fast: Bool) {
+        if timer != nil && fast == self.fast { return }
+        self.fast = fast
+        timer?.invalidate()
+        let t = Timer(timeInterval: fast ? 1.0 / 60 : 0.1, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private var fast = false
+    /// the angle, eased (the sensor gives whole degrees)
+    private var smooth: Double?
+    /// the brightness as set last, easing toward the target
+    private var shown: Float?
+    private var stillSince = Date()
+
     private func step() {
         guard let angle = angle(), let now = brightness() else { return }
-        let share = share(angle)
+        let eased = smooth.map { $0 + (angle - $0) * 0.18 } ?? angle
+        smooth = eased
+        let share = share(eased)
         if base == nil {
             base = share > 0.25 ? min(1, now / share) : now
-            lastSet = now
-        } else if let lastSet, abs(lastSet - now) > 0.02, Date().timeIntervalSince(setAt) > 1,
+            shown = now
+        } else if let shown, abs(shown - now) > 0.02, Date().timeIntervalSince(setAt) > 1,
                   share > 0.25, CGDisplayIsAsleep(display) == 0 {
             // changed by something else (and not mid-way through a change of ours): what the user wants
             base = min(1, now / share)
-            self.lastSet = now
+            self.shown = now
         }
-        defer { lastAngle = angle }
-        guard let last = lastAngle, abs(angle - last) >= 1, let base, let setBrightness else { return }
+        guard let base, let shown, let setBrightness else { return }
         let target = max(0.01, base * share)
-        guard abs(target - now) > 0.004 else { return }
-        if setBrightness(display, target) == 0 {
-            lastSet = target
+        let moving = abs(angle - eased) > 0.05 || abs(target - shown) > 0.001
+        if moving { stillSince = Date() }
+        pace(fast: Date().timeIntervalSince(stillSince) < 0.5)
+        guard abs(target - shown) > 0.001 else { return }
+        let next = shown + (target - shown) * 0.2
+        let value = abs(target - next) < 0.001 ? target : next
+        if setBrightness(display, value) == 0 {
+            self.shown = value
             setAt = Date()
         }
     }
