@@ -1503,6 +1503,16 @@ class DeskView: NSView {
             lid.target = self
             lid.state = LidLight.shared.on ? .on : .off
         }
+        if LidTaps.shared.available {
+            if LidTaps.shared.taught {
+                let taps = menu.addItem(withTitle: "Lid Taps Open Apps", action: #selector(toggleLidTaps), keyEquivalent: "")
+                taps.target = self
+                taps.state = LidTaps.shared.on ? .on : .off
+            }
+            let teach = menu.addItem(withTitle: LidTaps.shared.taught ? "Teach Lid Taps Again…" : "Teach Lid Taps…", action: #selector(teachLidTaps), keyEquivalent: "")
+            teach.target = self
+            teach.indentationLevel = LidTaps.shared.taught ? 1 : 0
+        }
         let theme = menu.addItem(withTitle: "Dark Appearance", action: #selector(toggleAppearance), keyEquivalent: "t")
         theme.keyEquivalentModifierMask = [.command, .shift]
         theme.target = self
@@ -1540,6 +1550,10 @@ class DeskView: NSView {
     @objc private func toggleCursors() { InkCursors.on.toggle() }
 
     @objc private func toggleLidLight() { LidLight.shared.on.toggle() }
+
+    @objc private func toggleLidTaps() { LidTaps.shared.on.toggle() }
+
+    @objc private func teachLidTaps() { LidTaps.shared.teach() }
 
     @objc private func toggleAppearance() { Appearance.toggle() }
 
@@ -2909,6 +2923,376 @@ final class LidLight {
     }
 }
 
+// ── lid taps: a tap on the screen opens the app of its corner ──
+
+/// A tap on the screen twists the lid a little, and differently for each part of it: the Mac's motion sensor
+/// (an accelerometer and a gyroscope of Apple's in the SPU, HID usage page 0xFF00, usages 3 and 9, about 800
+/// readings a second; undocumented) feels it. The screen is four zones, the corners' (top left FILE, top right
+/// SURF, bottom left HEAR, bottom right NOTE); which one a tap hit is told by the taps the user taught it
+/// (Teach Lid Taps…): its shape is compared with theirs. A tap it isn't sure of does nothing, nor one right
+/// after typing, a click or a scroll.
+final class LidTaps {
+    static let shared = LidTaps()
+    static let zones = 4
+    static let perZone = 6
+
+    struct Example: Codable { let zone: Int; let shape: [Double]; let peak: Double }
+
+    var on: Bool {
+        get { UserDefaults.standard.bool(forKey: "lidTaps") && taught }
+        set { UserDefaults.standard.set(newValue, forKey: "lidTaps"); newValue ? start() : stop() }
+    }
+
+    var taught: Bool { Set(examples.map(\.zone)).count == Self.zones }
+
+    private(set) var examples: [Example] = {
+        guard let data = UserDefaults.standard.data(forKey: "lidTapExamples") else { return [] }
+        return (try? JSONDecoder().decode([Example].self, from: data)) ?? []
+    }() {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(examples), forKey: "lidTapExamples") }
+    }
+
+    /// the motion sensor is there (the MacBooks from the M1 Pro and the M2 on)
+    lazy var available: Bool = !services(usage: 3).isEmpty
+
+    /// while teaching: each tap goes here instead of opening an app
+    var teaching: ((Example) -> Void)?
+
+    private var thread: Thread?
+    private var loop: CFRunLoop?
+    private var lastInput = Date.distantPast
+    private var monitor: Any?
+    private var lastTap = Date.distantPast
+
+    private func services(usage: Int) -> [io_service_t] {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleSPUHIDDevice"), &iterator) == KERN_SUCCESS else { return [] }
+        defer { IOObjectRelease(iterator) }
+        var out: [io_service_t] = []
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            let page = IORegistryEntryCreateCFProperty(service, "PrimaryUsagePage" as CFString, nil, 0)?.takeRetainedValue() as? Int
+            let use = IORegistryEntryCreateCFProperty(service, "PrimaryUsage" as CFString, nil, 0)?.takeRetainedValue() as? Int
+            if page == 0xFF00 && use == usage { out.append(service) } else { IOObjectRelease(service) }
+        }
+        return out
+    }
+
+    func start() {
+        guard thread == nil, available, on || teaching != nil else { return }
+        // typing, clicking and scrolling shake the Mac too: a tap just after one is none
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] _ in
+            self?.lastInput = Date()
+        }
+        let thread = Thread { [weak self] in self?.listen() }
+        thread.name = "ReDesk lid taps"
+        thread.qualityOfService = .userInteractive
+        self.thread = thread
+        thread.start()
+    }
+
+    func stop() {
+        guard teaching == nil, !on else { return }
+        if let loop { CFRunLoopStop(loop) }
+        loop = nil
+        thread = nil
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    // ── on the sensor's thread ──
+
+    private final class Stream {
+        var mean = SIMD3<Double>(repeating: .nan)
+        var ring = [SIMD3<Double>](repeating: .zero, count: 128)
+        var index = 0
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
+
+        /// the reading less its slow part (gravity, the lid's angle): only what moves
+        func push(_ value: SIMD3<Double>) -> SIMD3<Double> {
+            if mean.x.isNaN { mean = value }
+            mean += (value - mean) * 0.01
+            let moving = value - mean
+            ring[index % ring.count] = moving
+            index += 1
+            return moving
+        }
+
+        /// the last n, oldest first
+        func last(_ n: Int) -> [SIMD3<Double>] {
+            (0..<n).map { ring[(index - n + $0 + ring.count * 4) % ring.count] }
+        }
+    }
+
+    private let accel = Stream()
+    private let gyro = Stream()
+    private var noise = 0.002
+    private var count = 0
+    private var due: Int?
+    private var peak = 0.0
+    private var quietUntil = 0
+
+    private func listen() {
+        // the sensor's drivers report only when asked to (once a millisecond)
+        var iterator: io_iterator_t = 0
+        if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleSPUHIDDriver"), &iterator) == KERN_SUCCESS {
+            while case let driver = IOIteratorNext(iterator), driver != 0 {
+                for (key, value) in [("SensorPropertyReportingState", 1), ("SensorPropertyPowerState", 1), ("ReportInterval", 1000)] {
+                    IORegistryEntrySetCFProperty(driver, key as CFString, value as CFNumber)
+                }
+                IOObjectRelease(driver)
+            }
+            IOObjectRelease(iterator)
+        }
+        var devices: [IOHIDDevice] = []
+        for (usage, stream) in [(3, accel), (9, gyro)] {
+            for service in services(usage: usage) {
+                defer { IOObjectRelease(service) }
+                guard let device = IOHIDDeviceCreate(kCFAllocatorDefault, service),
+                      IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess else { continue }
+                let context = Unmanaged.passUnretained(self).toOpaque()
+                if usage == 3 {
+                    IOHIDDeviceRegisterInputReportCallback(device, stream.buffer, 64, { context, _, _, _, _, report, length in
+                        Unmanaged<LidTaps>.fromOpaque(context!).takeUnretainedValue().accelReport(report, length)
+                    }, context)
+                } else {
+                    IOHIDDeviceRegisterInputReportCallback(device, stream.buffer, 64, { context, _, _, _, _, report, length in
+                        Unmanaged<LidTaps>.fromOpaque(context!).takeUnretainedValue().gyroReport(report, length)
+                    }, context)
+                }
+                IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue)
+                devices.append(device)
+            }
+        }
+        loop = CFRunLoopGetCurrent()
+        CFRunLoopRun()
+        for device in devices {
+            IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue)
+            IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
+        }
+    }
+
+    /// x, y, z: three little-endian 16.16 numbers from the report's sixth byte
+    private static func xyz(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) -> SIMD3<Double>? {
+        guard length >= 18 else { return nil }
+        func at(_ o: Int) -> Double {
+            Double(Int32(bitPattern: UInt32(report[o]) | UInt32(report[o + 1]) << 8 | UInt32(report[o + 2]) << 16 | UInt32(report[o + 3]) << 24)) / 65536
+        }
+        return SIMD3(at(6), at(10), at(14))
+    }
+
+    private func gyroReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
+        if let value = Self.xyz(report, length) { _ = gyro.push(value) }
+    }
+
+    /// A tap: the shaking jumps well above its usual; its shape is taken 60 ms later (20 ms before, 60 after).
+    private func accelReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
+        guard let value = Self.xyz(report, length) else { return }
+        let moving = accel.push(value)
+        count += 1
+        let size = (moving * moving).sum().squareRoot()
+        if let at = due {
+            peak = max(peak, size)
+            if count >= at {
+                due = nil
+                quietUntil = count + 320
+                let shape = Self.shape(accel.last(64), gyro.last(64))
+                let peak = self.peak
+                DispatchQueue.main.async { self.felt(shape, peak: peak) }
+            }
+            return
+        }
+        guard count > 800 else { return noise += (size - noise) * 0.01 }
+        if size > max(noise * 15, 0.035), count > quietUntil {
+            due = count + 48
+            peak = size
+        } else {
+            noise += (size - noise) * 0.002
+        }
+    }
+
+    /// How the lid moved: each axis in eight steps of 10 ms (the twist), and how much each one shook,
+    /// each part of unit length (a soft tap and a firm one, the same shape).
+    private static func shape(_ accel: [SIMD3<Double>], _ gyro: [SIMD3<Double>]) -> [Double] {
+        func steps(_ s: [SIMD3<Double>]) -> [Double] {
+            var out: [Double] = []
+            for axis in 0..<3 {
+                for step in 0..<8 {
+                    var sum = 0.0
+                    for i in (step * 8)..<(step * 8 + 8) { sum += s[i][axis] }
+                    out.append(sum / 8)
+                }
+            }
+            return out
+        }
+        func shaking(_ s: [SIMD3<Double>]) -> [Double] {
+            var out: [Double] = []
+            for axis in 0..<3 {
+                var sum = 0.0
+                for v in s { sum += v[axis] * v[axis] }
+                out.append((sum / Double(s.count)).squareRoot())
+            }
+            return out
+        }
+        func unit(_ v: [Double], _ weight: Double) -> [Double] {
+            let length = v.reduce(0) { $0 + $1 * $1 }.squareRoot()
+            return length > 0 ? v.map { $0 / length * weight } : v
+        }
+        return unit(steps(accel), 1) + unit(steps(gyro), 1) + unit(shaking(accel) + shaking(gyro), 0.7)
+    }
+
+    // ── on the main thread ──
+
+    private func felt(_ shape: [Double], peak: Double) {
+        let example = Example(zone: -1, shape: shape, peak: peak)
+        if let teaching { return teaching(example) }
+        guard on, Date().timeIntervalSince(lastInput) > 0.35, Date().timeIntervalSince(lastTap) > 0.6,
+              !LockScreen.shared.shown, CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return }
+        // softer than the softest taught tap by far: a knock on the desk, the Mac set down
+        let soft = examples.map(\.peak).min() ?? 0
+        let zone = peak > soft * 0.4 ? Self.zone(of: shape, among: examples) : nil
+        Self.log(String(format: "tap %.3fg → %@", peak, zone.map { corners[$0].word } ?? "none"))
+        guard let zone else { return }
+        lastTap = Date()
+        ReDesk.open(corners[zone])
+    }
+
+    private static func similarity(_ a: [Double], _ b: [Double]) -> Double {
+        let dot = zip(a, b).reduce(0) { $0 + $1.0 * $1.1 }
+        let la = a.reduce(0) { $0 + $1 * $1 }.squareRoot(), lb = b.reduce(0) { $0 + $1 * $1 }.squareRoot()
+        return la > 0 && lb > 0 ? dot / (la * lb) : 0
+    }
+
+    /// The zone whose taught taps are most like this one (the best three of each), if it is clearly that one.
+    static func zone(of shape: [Double], among examples: [Example]) -> Int? {
+        var scores: [(zone: Int, score: Double)] = []
+        for zone in 0..<zones {
+            let alike = examples.filter { $0.zone == zone }.map { similarity(shape, $0.shape) }.sorted(by: >).prefix(3)
+            guard !alike.isEmpty else { continue }
+            scores.append((zone, alike.reduce(0, +) / Double(alike.count)))
+        }
+        scores.sort { $0.score > $1.score }
+        guard let best = scores.first, best.score > 0.55 else { return nil }
+        if scores.count > 1, best.score - scores[1].score < 0.06 { return nil }
+        return best.zone
+    }
+
+    /// Of the taught taps, how many are told right by the others (each left out in turn).
+    static func accuracy(_ examples: [Example]) -> Double {
+        guard !examples.isEmpty else { return 0 }
+        let right = examples.indices.filter { i in
+            var others = examples
+            others.remove(at: i)
+            return zone(of: examples[i].shape, among: others) == examples[i].zone
+        }.count
+        return Double(right) / Double(examples.count)
+    }
+
+    func teach() {
+        LidTapTeacher.shared.begin()
+    }
+
+    /// ~/Library/Application Support/ReDesk/LidTaps.log: each tap felt, how hard, and what it did
+    static func log(_ line: String) {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ReDesk")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("LidTaps.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        guard let data = "\(stamp) \(line)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    fileprivate func learned(_ new: [Example]) {
+        Self.log(String(format: "taught %d taps, %.0f%% told right", new.count, Self.accuracy(new) * 100))
+        examples = new
+        on = true
+    }
+}
+
+/// Teach Lid Taps…: a dot in each zone in turn, six rounds; tap gently on it, the screen as it is.
+final class LidTapTeacher: NSView {
+    static let shared = LidTapTeacher()
+
+    private var overlay: LockWindow?
+    private var order: [Int] = []
+    private var taught: [LidTaps.Example] = []
+    private var lastAt = Date.distantPast
+    private var message: String?
+    private var keys: Any?
+
+    func begin() {
+        guard overlay == nil, let screen = NSScreen.screens.first else { return }
+        order = (0..<LidTaps.perZone).flatMap { _ in (0..<LidTaps.zones).shuffled() }
+        taught = []
+        message = nil
+        let window = LockWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.level = .screenSaver
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.contentView = self
+        self.overlay = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == UInt16(kVK_Escape) { self?.end(keep: false); return nil }
+            return event
+        }
+        LidTaps.shared.teaching = { [weak self] example in self?.felt(example) }
+        LidTaps.shared.start()
+        needsDisplay = true
+    }
+
+    private func felt(_ example: LidTaps.Example) {
+        guard message == nil, let zone = order.first, Date().timeIntervalSince(lastAt) > 0.5 else { return }
+        lastAt = Date()
+        taught.append(LidTaps.Example(zone: zone, shape: example.shape, peak: example.peak))
+        order.removeFirst()
+        if order.isEmpty {
+            let right = Int((LidTaps.accuracy(taught) * 100).rounded())
+            message = "LEARNED · \(right)%"
+            needsDisplay = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.end(keep: true) }
+        }
+        needsDisplay = true
+    }
+
+    private func end(keep: Bool) {
+        if let keys { NSEvent.removeMonitor(keys) }
+        keys = nil
+        LidTaps.shared.teaching = nil
+        if keep { LidTaps.shared.learned(taught) } else { LidTaps.shared.stop() }
+        overlay?.orderOut(nil)
+        overlay = nil
+    }
+
+    private func center(_ zone: Int) -> NSPoint {
+        let left = zone % 2 == 0, top = zone < 2
+        return NSPoint(x: bounds.width * (left ? 0.25 : 0.75), y: bounds.height * (top ? 0.75 : 0.25))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.withAlphaComponent(0.72).setFill()
+        bounds.fill()
+        let words: String
+        if let message {
+            words = message
+        } else if let zone = order.first {
+            drawDiamond(at: center(zone), color: ink(0.9))
+            let done = LidTaps.perZone * LidTaps.zones - order.count
+            words = "TAP THE DIAMOND GENTLY · \(done + 1) / \(LidTaps.perZone * LidTaps.zones) · ESC TO STOP"
+        } else { return }
+        let text = NSAttributedString(string: words, attributes: [.font: lockLetters, .foregroundColor: ink(0.7), .kern: 2])
+        let size = text.size()
+        text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2))
+    }
+}
+
 final class Desk: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         InkCursors.restore()
@@ -3006,6 +3390,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         }
         CommandKeys.install()
         LidLight.shared.start()
+        LidTaps.shared.start()
     }
 
     private var night = false
