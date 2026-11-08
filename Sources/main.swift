@@ -3,7 +3,7 @@
 // (wallpapers/Light or wallpapers/Dark, as the Mac's appearance is).
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
-// Knocks: one, two or three knocks on the MacBook, each an action.
+// Knocks: two or three knocks on the MacBook, each an action.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
 // ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops), ⌘1…⌘8 pick an arrangement;
 // ⌘⇧T switches the Mac between light and dark (anywhere).
@@ -1509,8 +1509,8 @@ class DeskView: NSView {
             knocks.target = self
             knocks.state = Knocks.shared.on ? .on : .off
             if Knocks.shared.on {
-                for count in 1...3 {
-                    let item = menu.addItem(withTitle: "\(count) Knock\(count > 1 ? "s" : ""): \(Knocks.shared.action(count).title)", action: nil, keyEquivalent: "")
+                for count in Knocks.counts {
+                    let item = menu.addItem(withTitle: "\(count) Knocks: \(Knocks.shared.action(count).title)", action: nil, keyEquivalent: "")
                     item.indentationLevel = 1
                     let choices = NSMenu()
                     for action in KnockAction.allCases {
@@ -2954,11 +2954,11 @@ final class LidLight {
     }
 }
 
-// ── knocks: one, two or three knocks on the MacBook, each its own action ──
+// ── knocks: two or three knocks on the MacBook, each its own action ──
 
 /// What a number of knocks does.
 enum KnockAction: String, CaseIterable {
-    case none, lock, playPause, mute, screenshot, nextWallpaper, freezeWallpaper, file, surf, hear, note
+    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, file, surf, hear, note
 
     var title: String {
         switch self {
@@ -2967,6 +2967,8 @@ enum KnockAction: String, CaseIterable {
         case .playPause: return "Play / Pause"
         case .mute: return "Mute"
         case .screenshot: return "Screenshot"
+        case .hideWindows: return "Hide All Windows"
+        case .closeWindows: return "Close All Windows"
         case .nextWallpaper: return "Next Wallpaper"
         case .freezeWallpaper: return "Pause Wallpaper"
         case .file: return "Open ReFile"
@@ -2983,12 +2985,34 @@ enum KnockAction: String, CaseIterable {
         case .playPause: Self.mediaKey(16)  // NX_KEYTYPE_PLAY
         case .mute: Self.mediaKey(7)        // NX_KEYTYPE_MUTE
         case .screenshot: Self.keys(kVK_ANSI_3, [.maskCommand, .maskShift])
+        case .hideWindows: Self.others().forEach { $0.hide() }
+        case .closeWindows: Self.others().forEach(Self.closeWindows)
         case .nextWallpaper: Wallpapers.step(1)
         case .freezeWallpaper: LiveWallpaper.shared.frozen.toggle()
         case .file: ReDesk.open(corners[0])
         case .surf: ReDesk.open(corners[1])
         case .hear: ReDesk.open(corners[2])
         case .note: ReDesk.open(corners[3])
+        }
+    }
+
+    /// the apps with windows, but ReDesk
+    private static func others() -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && $0 != NSRunningApplication.current }
+    }
+
+    /// Each of the app's windows closed with its own close button (the app keeps running; a window with
+    /// unsaved changes asks first, as it always does). Needs the Accessibility permission.
+    private static func closeWindows(of app: NSRunningApplication) {
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return }
+        for window in windows {
+            var button: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXCloseButtonAttribute as CFString, &button) == .success, let button {
+                AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
+            }
         }
     }
 
@@ -3013,7 +3037,7 @@ enum KnockAction: String, CaseIterable {
     }
 }
 
-/// Knocks on the MacBook (its side, the palm rest, the lid): one, two or three in a row, each count its own
+/// Knocks on the MacBook (its side, the palm rest, the lid): two or three in a row, each count its own
 /// action (right click › Knocks). The Mac's motion sensor feels them: an accelerometer and a gyroscope of
 /// Apple's in the SPU (HID usage page 0xFF00, usages 3 and 9, about 800 readings a second; undocumented, no
 /// root needed), read on a thread of its own. Each reading is split into the body's motion (about 1 to 40 Hz)
@@ -3028,7 +3052,9 @@ final class Knocks {
         set { UserDefaults.standard.set(newValue, forKey: "knocks"); newValue ? start() : stop() }
     }
 
-    static let defaults: [Int: KnockAction] = [1: .none, 2: .playPause, 3: .lock]
+    /// the counts that do something: two and three (a single knock happens by chance too easily)
+    static let counts = [2, 3]
+    static let defaults: [Int: KnockAction] = [2: .playPause, 3: .lock]
 
     func action(_ count: Int) -> KnockAction {
         KnockAction(rawValue: UserDefaults.standard.string(forKey: "knock\(count)") ?? "") ?? Self.defaults[count] ?? .none
@@ -3285,7 +3311,7 @@ final class Knocks {
             KnockFlash.shared.hide()
             return Self.log("\(count) knocks, but typing or clicking around them: nothing")
         }
-        let action = count <= 3 ? self.action(count) : .none
+        let action = Self.counts.contains(count) ? self.action(count) : .none
         Self.log("\(count) knocks → \(action.title)")
         KnockFlash.shared.done(action == .none ? nil : action.title)
         action.run()
