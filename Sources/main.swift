@@ -3093,7 +3093,8 @@ final class LidTaps {
         gyroCount += 1
         gyroNow = (moving * moving).sum().squareRoot()
         secondGyro = max(secondGyro, gyroNow)
-        if due == nil { gyroNoise += (gyroNow - gyroNoise) * (gyroCount > 800 ? 0.002 : 0.01) }
+        // the usual: from the still moments only (a tap, and its ringing after, would raise it)
+        if due == nil && count > quietUntil { gyroNoise += (min(gyroNow, gyroNoise * 2) - gyroNoise) * (gyroCount > 800 ? 0.0005 : 0.01) }
     }
 
     /// A tap: the shaking jumps well above its usual; its shape is taken 60 ms later (20 ms before, 60 after).
@@ -3113,7 +3114,7 @@ final class LidTaps {
             secondGyro = 0
         }
         // how far above their usual the accelerometer and the gyroscope shake now
-        let strength = max(size / max(noise, 0.0005), gyroNow / max(gyroNoise, 0.005))
+        let strength = max(size / max(noise, 0.0015), gyroNow / max(gyroNoise, 0.2))
         if let at = due {
             peak = max(peak, strength)
             if count >= at {
@@ -3125,12 +3126,12 @@ final class LidTaps {
             }
             return
         }
-        guard count > 800 else { return noise += (size - noise) * 0.01 }
+        guard count > 800 else { return noise += (min(size, max(noise, 0.001) * 2) - noise) * 0.01 }
         if strength > 7, count > quietUntil {
             due = count + 48
             peak = strength
-        } else {
-            noise += (size - noise) * 0.002
+        } else if count > quietUntil {
+            noise += (min(size, noise * 2) - noise) * 0.0005
         }
     }
 
