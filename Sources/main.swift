@@ -2985,7 +2985,11 @@ final class LidTaps {
 
     var on: Bool {
         get { UserDefaults.standard.bool(forKey: "lidTaps") && taught }
-        set { UserDefaults.standard.set(newValue, forKey: "lidTaps"); newValue ? start() : stop() }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "lidTaps")
+            newValue ? start() : stop()
+            newValue ? Knocks.shared.start() : Knocks.shared.stop()
+        }
     }
 
     var taught: Bool { Set(examples.map(\.zone)).count == Self.zones }
@@ -3259,8 +3263,9 @@ final class LidTaps {
         // two or three knocks are a knock gesture (Knocks), not a tap on the screen: wait till it's clear
         let at = Date()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            guard Knocks.shared.knocks(since: at.addingTimeInterval(-0.1)) <= 1 else {
-                return Self.log("… part of a knock gesture: nothing")
+            // the knock sensing tells a tap on the screen from a knock on the Mac: only the first opens an app
+            guard !Knocks.shared.available || Knocks.shared.screenTap(near: at) else {
+                return Self.log("… a knock on the Mac, not the screen: nothing")
             }
             ReDesk.open(corners[zone])
         }
@@ -3555,7 +3560,8 @@ final class Knocks {
     }
 
     func start() {
-        guard thread == nil, available, on || testing != nil else { return }
+        // the screen taps (LidTaps) need it too, to tell a tap on the screen from a knock
+        guard thread == nil, available, on || testing != nil || LidTaps.shared.on else { return }
         tune()
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] _ in
             self?.lastInput = Date()
@@ -3568,6 +3574,7 @@ final class Knocks {
     }
 
     func stop() {
+        guard !on, !LidTaps.shared.on else { return }
         if let loop { CFRunLoopStop(loop) }
         loop = nil
         thread = nil
@@ -3583,12 +3590,11 @@ final class Knocks {
         private var fast = SIMD3<Double>(repeating: .nan)
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
 
-        func push(_ value: SIMD3<Double>) -> (motion: Double, knock: Double) {
+        func push(_ value: SIMD3<Double>) -> (motion: SIMD3<Double>, knock: SIMD3<Double>) {
             if slow.x.isNaN { slow = value; fast = value }
             slow += (value - slow) * 0.01
             fast += (value - fast) * 0.25
-            let m = fast - slow, k = value - fast
-            return ((m * m).sum().squareRoot(), (k * k).sum().squareRoot())
+            return (fast - slow, value - fast)
         }
     }
 
@@ -3626,6 +3632,9 @@ final class Knocks {
     var logSeconds = false
     private var due: Int?
     private var knockPeak = 0.0
+    /// along each axis: the ringing of the first 30 ms, the gyroscope's strongest turn
+    private var ringAxes = SIMD3<Double>.zero
+    private var gyroAxes = SIMD3<Double>.zero
     private var motionPeak = 0.0
     private var quietUntil = 0
     private var lastKnock = -10_000
@@ -3691,18 +3700,21 @@ final class Knocks {
 
     private func gyroReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
         guard let value = Self.xyz(report, length) else { return }
-        let (motion, _) = gyro.push(value)
+        let (turn, _) = gyro.push(value)
+        let motion = (turn * turn).sum().squareRoot()
+        if due != nil { gyroAxes = pointwiseMax(gyroAxes, abs(turn)) }
         gyroMotion[gyroCount % gyroMotion.count] = motion
         gyroCount += 1
         secondMotion = max(secondMotion, motion)
     }
 
     /// A knock: the ringing well above the usual; looked at 60 ms later. If the Mac swung meanwhile (the
-    /// gyroscope over 15°/s) or the ringing was small beside the motion, the Mac was moved, not knocked.
+    /// gyroscope over 25°/s; a knock on the palm rest turns it up to 15, moving it 30 to 70) or the ringing was small beside the motion, the Mac was moved, not knocked.
     /// Just after a knock its own ringing is no new one: the next must be at least 0.4 of it.
     private func accelReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
         guard let value = Self.xyz(report, length) else { return }
-        let (motion, knock) = accel.push(value)
+        let (moved, rang) = accel.push(value)
+        let motion = (moved * moved).sum().squareRoot(), knock = (rang * rang).sum().squareRoot()
         count += 1
         knockUsual.add(knock)
         secondKnock = max(secondKnock, knock)
@@ -3715,6 +3727,7 @@ final class Knocks {
             secondMotion = 0
         }
         if let at = due {
+            if count < at - 24 { ringAxes += rang * rang }
             knockPeak = max(knockPeak, knock)
             motionPeak = max(motionPeak, motion)
             guard count >= at else { return }
@@ -3722,7 +3735,19 @@ final class Knocks {
             quietUntil = count + 64
             let turned = gyroMotion.max() ?? 0
             let peak = knockPeak, ratio = knockPeak / max(motionPeak, 0.0001)
-            guard turned < 15, ratio > 0.4 else {
+            // a tap on the screen, not a knock on the Mac: it rings most along y (to and from the screen),
+            // or tilts the lid back about the hinge (x) more than anything else
+            let ring = ringAxes, tilt = gyroAxes
+            if ring.y > max(ring.x, ring.z) || (tilt.x > 3 && tilt.x > 1.5 * max(tilt.y, tilt.z)) {
+                let line = String(format: "a tap on the screen, no knock: %.3fg, ring x %.4f y %.4f z %.4f, tilt x %.1f y %.1f z %.1f",
+                                  peak, ring.x.squareRoot(), ring.y.squareRoot(), ring.z.squareRoot(), tilt.x, tilt.y, tilt.z)
+                DispatchQueue.main.async {
+                    Knocks.log(line)
+                    self.screenTimes = self.screenTimes.filter { Date().timeIntervalSince($0) < 5 } + [Date()]
+                }
+                return
+            }
+            guard turned < 25, ratio > 0.4 else {
                 let line = String(format: "moved, not knocked: %.3fg, turn %.0f°/s, ring/motion %.2f", peak, turned, ratio)
                 DispatchQueue.main.async { Knocks.log(line) }
                 return
@@ -3735,6 +3760,8 @@ final class Knocks {
         guard count > 1600, count > quietUntil, knock > max(knockUsual.level * times, floor) else { return }
         if count - lastKnock < 240 && knock < lastPeak * 0.4 { return }
         due = count + 48
+        ringAxes = rang * rang
+        gyroAxes = .zero
         knockPeak = knock
         motionPeak = motion
     }
@@ -3747,6 +3774,14 @@ final class Knocks {
 
     /// how many knocks were felt from then on (for the screen taps: one is a tap, more a knock gesture)
     func knocks(since date: Date) -> Int { knockTimes.filter { $0 >= date }.count }
+
+    /// taps on the screen felt (not knocks): when
+    private var screenTimes: [Date] = []
+
+    /// whether a tap on the screen (not a knock on the Mac) was felt about then
+    func screenTap(near date: Date) -> Bool {
+        screenTimes.contains { $0 > date.addingTimeInterval(-0.4) && $0 < date.addingTimeInterval(0.3) }
+    }
     private var lastAt = Date.distantPast
     private var done: DispatchWorkItem?
 
