@@ -3023,6 +3023,30 @@ final class LidTaps {
         }
     }
 
+    /// The usual shaking: the strongest of each 50 ms, over the last two seconds, the quieter third's top.
+    /// A tap and its ringing take a few of those 50 ms; they don't move it.
+    private final class Usual {
+        private var blocks = [Double](repeating: 0, count: 40)
+        private var index = 0
+        private var block = 0.0
+        private var samples = 0
+        private(set) var level = 0.0
+
+        func add(_ size: Double) {
+            block = max(block, size)
+            samples += 1
+            guard samples == 40 else { return }
+            blocks[index % blocks.count] = block
+            index += 1
+            samples = 0
+            block = 0
+            let filled = blocks.prefix(min(index, blocks.count)).sorted()
+            level = filled[filled.count / 3]
+        }
+    }
+
+    private let accelUsual = Usual()
+    private let gyroUsual = Usual()
     private let accel = Stream()
     private let gyro = Stream()
     private var noise = 0.002
@@ -3093,8 +3117,8 @@ final class LidTaps {
         gyroCount += 1
         gyroNow = (moving * moving).sum().squareRoot()
         secondGyro = max(secondGyro, gyroNow)
-        // the usual: from the still moments only (a tap, and its ringing after, would raise it)
-        if due == nil && count > quietUntil { gyroNoise += (min(gyroNow, gyroNoise * 2) - gyroNoise) * (gyroCount > 800 ? 0.0005 : 0.01) }
+        gyroUsual.add(gyroNow)
+        gyroNoise = gyroUsual.level
     }
 
     /// A tap: the shaking jumps well above its usual; its shape is taken 60 ms later (20 ms before, 60 after).
@@ -3106,15 +3130,18 @@ final class LidTaps {
         secondAccel = max(secondAccel, size)
         if count % 800 == 0 {
             if logSeconds {
-                let line = String(format: "second: accel max %.4fg (usual %.4f), gyro max %.3f (usual %.3f), reports %d/%d",
+                let line = String(format: "second: accel max %.4fg (usual %.4f), gyro max %.2f (usual %.2f), reports %d/%d",
                                   secondAccel, noise, secondGyro, gyroNoise, count, gyroCount)
                 DispatchQueue.main.async { LidTaps.log(line) }
             }
             secondAccel = 0
             secondGyro = 0
         }
-        // how far above their usual the accelerometer and the gyroscope shake now
-        let strength = max(size / max(noise, 0.0015), gyroNow / max(gyroNoise, 0.2))
+        accelUsual.add(size)
+        noise = accelUsual.level
+        // how far above their usual the accelerometer and the gyroscope shake now (never above less
+        // than a still Mac's shaking: 0.004 g, 0.4°/s)
+        let strength = max(size / max(noise, 0.004), gyroNow / max(gyroNoise, 0.4))
         if let at = due {
             peak = max(peak, strength)
             if count >= at {
@@ -3126,12 +3153,10 @@ final class LidTaps {
             }
             return
         }
-        guard count > 800 else { return noise += (min(size, max(noise, 0.001) * 2) - noise) * 0.01 }
-        if strength > 7, count > quietUntil {
+        guard count > 1600 else { return }
+        if strength > 4, count > quietUntil {
             due = count + 48
             peak = strength
-        } else if count > quietUntil {
-            noise += (min(size, noise * 2) - noise) * 0.0005
         }
     }
 
