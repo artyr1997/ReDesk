@@ -895,6 +895,19 @@ final class Tiler {
         }
     }
 
+    /// Almost Full: the windows share nearly the whole screen (under the menu bar, `tileGap` from the
+    /// edges) instead of the desk's middle, in any arrangement, with the apps across the top as in Full Screen
+    var almostFull = UserDefaults.standard.bool(forKey: "almostFull") {
+        didSet {
+            UserDefaults.standard.set(almostFull, forKey: "almostFull")
+            retile()
+            NotificationCenter.default.post(name: .arrangementChanged, object: nil)
+        }
+    }
+
+    /// whether the apps go across the top: Full Screen, or Almost Full
+    var showsApps: Bool { on && (arrangement == .full || almostFull) }
+
     /// the windows, main first; `slots[i]` is where `order[i]` belongs
     private var order: [TiledWindow] = []
     /// every window still alive in its turn, also those out of sight for now (on another desktop, its app
@@ -1072,11 +1085,12 @@ final class Tiler {
         if resized { retile() }
     }
 
-    /// Where the windows share: the desk's middle, or the whole screen in Full Screen.
+    /// Where the windows share: the desk's middle, the whole screen in Full Screen, nearly all of it in Almost Full.
     private func tilingArea() -> NSRect? {
         guard let screen = NSScreen.screens.first else { return nil }
         let layout = Layout(area: screen.visibleFrame)
-        return arrangement == .full ? layout.area : layout.tiles
+        if arrangement == .full { return layout.area }
+        return almostFull ? layout.area.insetBy(dx: tileGap, dy: tileGap) : layout.tiles
     }
 
     private func places() -> [NSRect] {
@@ -4173,6 +4187,7 @@ final class SettingsPopup: Popup {
         let arrangements = Arrangement.allCases
         desk.append(choiceRow("Arrangement", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0,
                               indent: 18, note: "⌘1…⌘8") { Tiler.shared.choose(arrangements[$0]) })
+        desk.append(toggleRow("Almost full", Tiler.shared.almostFull, indent: 18) { Tiler.shared.almostFull = $0 })
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
@@ -4448,10 +4463,10 @@ final class Desk: NSObject, NSApplicationDelegate {
         showBar()
     }
 
-    /// The apps across the top: only while the windows are in Full Screen. In the menu bar while it stays,
+    /// The apps across the top: only while the windows are in Full Screen or Almost Full. In the menu bar while it stays,
     /// on the desk in its strip while it hides.
     private func showBar() {
-        let full = Tiler.shared.on && Tiler.shared.arrangement == .full
+        let full = Tiler.shared.showsApps
         AppMenuBar.shared.shown = full && !menuBarHides
         guard full && menuBarHides, let screen = NSScreen.screens.first, screen.frame.maxY > screen.visibleFrame.maxY else {
             return stripWindow.orderOut(nil)
