@@ -3,7 +3,7 @@
 // (wallpapers/Light or wallpapers/Dark, as the Mac's appearance is).
 // Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
-// Knocks: two or three knocks on the MacBook, each an action.
+// Knocks: two to five knocks on the MacBook, each an action.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
 // ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops), ⌘1…⌘8 pick an arrangement;
 // ⌘⇧T switches the Mac between light and dark (anywhere).
@@ -3511,8 +3511,8 @@ final class Knocks {
         set { UserDefaults.standard.set(newValue, forKey: "knocks"); newValue ? start() : stop() }
     }
 
-    /// the counts that do something: two and three (a single knock happens by chance too easily)
-    static let counts = [2, 3]
+    /// the counts that do something: two to five (a single knock happens by chance too easily)
+    static let counts = [2, 3, 4, 5]
     static let defaults: [Int: KnockAction] = [2: .playPause, 3: .lock]
 
     func action(_ count: Int) -> KnockAction {
