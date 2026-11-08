@@ -638,7 +638,8 @@ enum HotKeys {
 }
 
 /// ⌘ keys, only while one of the Re apps is in front (elsewhere they keep their usual meaning):
-/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle, ⌘1…⌘8 an arrangement.
+/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle, ⌘1…⌘8 an arrangement,
+/// ⌘0 Almost Full on / off.
 /// Taking a key away from an app needs an event tap, which needs the Accessibility permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
@@ -678,6 +679,8 @@ enum CommandKeys {
             return { Wallpapers.step(-arrow) }
         }
         guard flags == .maskCommand else { return nil }
+        // ⌘0: Almost Full on / off
+        if key == kVK_ANSI_0 { return { Tiler.shared.almostFull.toggle() } }
         // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
         if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
             return { Tiler.shared.choose(Arrangement.allCases[number]) }
@@ -4187,7 +4190,7 @@ final class SettingsPopup: Popup {
         let arrangements = Arrangement.allCases
         desk.append(choiceRow("Arrangement", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0,
                               indent: 18, note: "⌘1…⌘8") { Tiler.shared.choose(arrangements[$0]) })
-        desk.append(toggleRow("Almost full", Tiler.shared.almostFull, indent: 18) { Tiler.shared.almostFull = $0 })
+        desk.append(toggleRow("Almost full", Tiler.shared.almostFull, indent: 18, note: "⌘0") { Tiler.shared.almostFull = $0 })
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
@@ -4263,7 +4266,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one")]),
-            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
+            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),

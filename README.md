@@ -18,7 +18,7 @@ Around them:
   - **One at a Time**: each window fills the whole area
   - **Full Screen**: each window fills the screen, one over another (the focused one on top), right under the menu bar, with the apps across the top: FILE · SURF · HEAR · NOTE, the app in front in full ink, a click goes to one. In the menu bar while it stays; on the desk where it would be while it hides, spread evenly across the screen
 
-  **Almost Full** (right click › Almost full, with any arrangement): the windows share nearly the whole screen instead of the desk's middle, right under the menu bar and 10pt from the edges, with the apps across the top as in Full Screen. The choice is kept.
+  **Almost Full** (right click › Almost full, or **⌘0** in the Re apps; with any arrangement): the windows share nearly the whole screen instead of the desk's middle, right under the menu bar and 10pt from the edges, with the apps across the top as in Full Screen. The choice is kept.
 
   Pick one in the right-click menu or with **⌘1…⌘8** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌃⌥⇧ arrows** move it to its neighbour's place. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Pulling a window's edge resizes it within the arrangement: the cut between it and its neighbour moves, and the neighbour gives way as it goes (no part narrower than 240 points). **⌃⌥⌘ arrows** do the same from the keyboard: the border between the focused window and its neighbour moves that way, 80 points at a time, so a window on the left grows with → and one on the right with ← (the border on the right, or below, when the window has neighbours on both sides). The sizes are kept per arrangement and number of windows until ReDesk quits; choosing the arrangement already in use evens them out again. One at a Time and Full Screen have nothing to share, so there a resized window goes back. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
 
@@ -30,6 +30,7 @@ Around them:
 | ⌃⌥⇧← ⌃⌥⇧→ ⌃⌥⇧↑ ⌃⌥⇧↓ | anywhere, while tiling | the focused window trades places with the nearest one that way (in One at a Time: moves back / forth in the turn) |
 | ⌃⌥T | anywhere | tiling on / off |
 | ⌘1…⌘8 | in the Re apps | an arrangement, tiling on |
+| ⌘0 | in the Re apps | Almost Full on / off |
 | ⌃⌥Space | anywhere | next arrangement |
 | ⌃⌥↩ | anywhere | the focused window becomes the main one |
 | ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |
