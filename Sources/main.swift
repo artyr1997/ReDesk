@@ -1093,7 +1093,10 @@ final class Tiler {
         guard let screen = NSScreen.screens.first else { return nil }
         let layout = Layout(area: screen.visibleFrame)
         if arrangement == .full { return layout.area }
-        return almostFull ? layout.area.insetBy(dx: tileGap, dy: tileGap) : layout.tiles
+        // Almost Full: right under the top (the menu bar, or the apps' strip where it hides), `tileGap` from the other edges
+        let almost = NSRect(x: layout.area.minX + tileGap, y: layout.area.minY + tileGap,
+                            width: layout.area.width - tileGap * 2, height: layout.area.height - tileGap)
+        return almostFull ? almost : layout.tiles
     }
 
     private func places() -> [NSRect] {
