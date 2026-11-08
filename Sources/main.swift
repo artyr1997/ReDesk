@@ -3759,7 +3759,8 @@ final class Knocks {
         lastAt = now
         knockTimes = knockTimes.filter { now.timeIntervalSince($0) < 5 } + [now]
         Self.log(String(format: "knock %d, %.3fg", knocks, peak))
-        KnockFlash.shared.show(knocks)
+        // one alone is no gesture (and may be a tap on the screen): the diamonds from the second on
+        if knocks >= 2 { KnockFlash.shared.show(knocks) }
         done?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.finish() }
         done = work
@@ -3777,7 +3778,7 @@ final class Knocks {
         }
         let action = Self.counts.contains(count) ? self.action(count) : .none
         Self.log("\(count) knocks → \(action.title)")
-        KnockFlash.shared.done(action == .none ? nil : action.title)
+        if count >= 2 { KnockFlash.shared.done(action == .none ? nil : action.title) }
         action.run()
     }
 
