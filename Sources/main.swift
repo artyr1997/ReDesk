@@ -3980,6 +3980,9 @@ class Popup: NSPanel {
 
     func refresh() {
         actions = []
+        // the lists a choice opens, light or dark with the paper
+        appearance = NSAppearance(named: Appearance.dark ? .darkAqua : .aqua)
+        veil.appearance = appearance
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let width = width(on: screen)
         setContentSize(NSSize(width: width, height: 400))
@@ -4126,8 +4129,9 @@ final class PaperView: NSView {
         Popup.paper.setFill()
         bounds.fill()
         if let grain = Popup.grain {
+            // as the apps: at night the grain is multiplied into the paper (background-blend-mode: multiply)
             NSColor(patternImage: grain).setFill()
-            bounds.fill(using: .sourceOver)
+            bounds.fill(using: Appearance.dark ? .multiply : .sourceOver)
         }
         Popup.line.setStroke()
         let edge = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
@@ -4425,6 +4429,8 @@ final class Desk: NSObject, NSApplicationDelegate {
         // the ink turns with it (where there's no wallpaper to look at)
         windows.forEach { $0.redrawFading() }
         stripWindow.redrawFading()
+        // an open popup turns with it
+        for popup in [SettingsPopup.shared, KeysPopup.shared] as [Popup] where popup.isVisible { popup.refresh() }
         NotificationCenter.default.post(name: .wallpaperChanged, object: nil)
     }
 
@@ -4471,6 +4477,9 @@ if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < Co
     let folder = URL(fileURLWithPath: CommandLine.arguments[at + 1])
     _ = NSApplication.shared
     _ = letterFont
+    if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+    if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
+    let suffix = Appearance.dark ? "-dark" : "-light"
     func render(_ popup: Popup, _ name: String) {
         popup.refresh()
         guard let view = popup.contentView else { return }
@@ -4492,8 +4501,8 @@ if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < Co
             try? png.write(to: folder.appendingPathComponent(name))
         }
     }
-    render(SettingsPopup.shared, "settings.png")
-    render(KeysPopup.shared, "keys.png")
+    render(SettingsPopup.shared, "settings\(suffix).png")
+    render(KeysPopup.shared, "keys\(suffix).png")
     exit(0)
 }
 
