@@ -3900,12 +3900,42 @@ final class Snap {
     }
 }
 
-// ── the two popups: Settings (⌃⌥, or a right click) and Keys (⌃⌥/), a guide to every Re app's keys ──
+// ── the two popups: Settings (⌃⌥, or a right click) and Keys (⌃⌥/), every Re app's keys ──
 
-/// A popup over everything, in the middle of the screen: dark glass, the desk's ink. Esc, the same keys
-/// again, or a click elsewhere closes it.
+@_silgen_name("CGSSetWindowBackgroundBlurRadius")
+private func CGSSetWindowBackgroundBlurRadius(_ cid: CGSConnectionID, _ wid: Int32, _ radius: Int32) -> CGError
+
+/// The Re apps' popups (as ReNote's INFO): the paper, its grain and a 2pt line round it, in the middle of the
+/// screen, everything else blurred behind; the heading in Noto Sans JP spaced wide, the words in Kurale.
+/// Light or dark as the Mac is. Esc, the same keys again, or a click beside it closes it.
 class Popup: NSPanel {
-    private let glass = NSVisualEffectView()
+    /// the paper's colours, as the apps' --bg, --text and --line
+    static var paper: NSColor { Appearance.dark ? NSColor(white: 0x1d / 255.0, alpha: 1) : NSColor(white: 0xF4 / 255.0, alpha: 1) }
+    static var text: NSColor { Appearance.dark ? NSColor(white: 0x80 / 255.0, alpha: 1) : NSColor(white: 0x47 / 255.0, alpha: 1) }
+    static var line: NSColor { Appearance.dark ? NSColor(white: 0x74 / 255.0, alpha: 1) : NSColor(red: 0x57 / 255.0, green: 0x58 / 255.0, blue: 0x5A / 255.0, alpha: 1) }
+
+    static let fonts: Void = {
+        for name in ["Kurale"] {
+            if let url = Bundle.main.url(forResource: name, withExtension: "woff") {
+                CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            }
+        }
+        _ = letterFont
+    }()
+    static func noto(_ size: CGFloat) -> NSFont { _ = fonts; return NSFont(name: "NotoSansJP-Regular", size: size) ?? .systemFont(ofSize: size, weight: .light) }
+    static func kurale(_ size: CGFloat) -> NSFont { _ = fonts; return NSFont(name: "Kurale-Regular", size: size) ?? NSFont(name: "Kurale", size: size) ?? .systemFont(ofSize: size) }
+    static let grain = Bundle.main.image(forResource: "noise")
+
+    private let paperView = PaperView()
+    private lazy var veil: NSWindow = {
+        let veil = VeilWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
+        veil.level = NSWindow.Level(rawValue: NSWindow.Level.modalPanel.rawValue - 1)
+        veil.isOpaque = false
+        veil.backgroundColor = NSColor(white: 0, alpha: 0.001)
+        veil.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        veil.onClick = { [weak self] in self?.close() }
+        return veil
+    }()
     /// the controls' actions, kept while they're shown
     var actions: [Do] = []
 
@@ -3915,79 +3945,96 @@ class Popup: NSPanel {
         level = .modalPanel
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
-        isMovableByWindowBackground = true
+        hasShadow = false
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        appearance = NSAppearance(named: .darkAqua)
-        glass.material = .hudWindow
-        glass.state = .active
-        glass.blendingMode = .behindWindow
-        glass.wantsLayer = true
-        glass.layer?.cornerRadius = 18
-        glass.layer?.masksToBounds = true
-        contentView = glass
+        contentView = paperView
     }
 
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { close() }
     override func resignKey() { super.resignKey(); close() }
+    override func close() { super.close(); veil.orderOut(nil) }
 
     /// the popup's content: built anew each time it shows (and when a choice changes what it shows)
     func build() -> NSView { NSView() }
+
+    /// how wide it is on this screen
+    func width(on screen: NSRect) -> CGFloat { frame.width }
 
     func toggle() { isVisible ? close() : show() }
 
     func show() {
         refresh()
+        if let screen = NSScreen.main {
+            veil.setFrame(screen.frame, display: true)
+            veil.orderFront(nil)
+            _ = CGSSetWindowBackgroundBlurRadius(CGSMainConnectionID(), Int32(veil.windowNumber), 12)
+        }
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
     }
 
     func refresh() {
         actions = []
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let width = width(on: screen)
+        setContentSize(NSSize(width: width, height: 400))
         let content = build()
         content.translatesAutoresizingMaskIntoConstraints = false
-        glass.subviews.forEach { $0.removeFromSuperview() }
-        glass.addSubview(content)
+        paperView.subviews.forEach { $0.removeFromSuperview() }
+        paperView.addSubview(content)
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: glass.leadingAnchor, constant: 28),
-            content.trailingAnchor.constraint(equalTo: glass.trailingAnchor, constant: -28),
-            content.topAnchor.constraint(equalTo: glass.topAnchor, constant: 26),
+            content.leadingAnchor.constraint(equalTo: paperView.leadingAnchor, constant: 48),
+            content.trailingAnchor.constraint(equalTo: paperView.trailingAnchor, constant: -48),
+            content.topAnchor.constraint(equalTo: paperView.topAnchor, constant: 40),
         ])
-        glass.layoutSubtreeIfNeeded()
-        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let height = min(content.fittingSize.height + 52, screen.height - 40)
-        let width = frame.width
+        paperView.needsDisplay = true
+        paperView.layoutSubtreeIfNeeded()
+        let height = min(content.fittingSize.height + 80, screen.height - 40)
         setFrame(NSRect(x: screen.midX - width / 2, y: screen.midY - height / 2, width: width, height: height), display: true)
     }
 
     // ── pieces ──
 
-    static let body = NSFont(name: "NotoSansJP-Regular", size: 13) ?? .systemFont(ofSize: 13, weight: .light)
-
-    func title(_ words: String) -> NSTextField {
-        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
-            .font: NSFont(name: "NotoSansJP-Regular", size: 18) ?? .systemFont(ofSize: 18, weight: .light),
-            .foregroundColor: ink(0.9), .kern: 4,
-        ]))
-        return field
-    }
-
     func heading(_ words: String) -> NSTextField {
-        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
-            .font: lockLetters, .foregroundColor: ink(0.45), .kern: 2.5,
+        NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
+            .font: Self.noto(18), .foregroundColor: Self.text, .kern: 7.2,
         ]))
+    }
+
+    /// a section's name: small, spaced, quiet
+    func caption(_ words: String) -> NSTextField {
+        NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
+            .font: Self.noto(11), .foregroundColor: Self.text.withAlphaComponent(0.6), .kern: 2.2,
+        ]))
+    }
+
+    func words(_ words: String, size: CGFloat = 14, alpha: CGFloat = 1) -> NSTextField {
+        let field = NSTextField(wrappingLabelWithString: words)
+        field.font = Self.kurale(size)
+        field.textColor = Self.text.withAlphaComponent(alpha)
+        field.isSelectable = false
         return field
     }
 
-    func label(_ words: String, alpha: CGFloat = 0.85, size: CGFloat = 13) -> NSTextField {
-        let field = NSTextField(labelWithString: words)
-        field.font = size == 13 ? Self.body : NSFont(name: "NotoSansJP-Regular", size: size) ?? .systemFont(ofSize: size)
-        field.textColor = ink(alpha)
-        field.lineBreakMode = .byWordWrapping
-        field.maximumNumberOfLines = 0
+    /// keys, as the apps write them: Noto Sans JP, small, quieter
+    func keys(_ keys: String) -> NSTextField {
+        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: keys, attributes: [
+            .font: Self.noto(11), .foregroundColor: Self.text.withAlphaComponent(0.6), .kern: 0.55,
+        ]))
+        field.setContentCompressionResistancePriority(.required, for: .horizontal)
         return field
+    }
+
+    func divider() -> NSView {
+        let line = NSBox()
+        line.boxType = .custom
+        line.borderWidth = 0
+        line.fillColor = Self.line.withAlphaComponent(0.3)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return line
     }
 
     func act(_ run: @escaping (Any) -> Void) -> Do {
@@ -3996,67 +4043,101 @@ class Popup: NSPanel {
         return action
     }
 
+    /// a word to click, as the apps' buttons: Noto Sans JP, capitals, spaced
+    func button(_ title: String, alpha: CGFloat = 1, _ press: @escaping (NSButton) -> Void) -> NSButton {
+        let button = NSButton(title: "", target: nil, action: nil)
+        button.isBordered = false
+        button.attributedTitle = NSAttributedString(string: title.uppercased(), attributes: [
+            .font: Self.noto(12), .foregroundColor: Self.text.withAlphaComponent(alpha), .kern: 2.4,
+        ])
+        let action = act { sender in if let b = sender as? NSButton { press(b) } }
+        button.target = action
+        button.action = #selector(Do.fire(_:))
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return button
+    }
+
     /// a line: the words on the left, the control on the right
-    func row(_ words: String, _ control: NSView, indent: CGFloat = 0) -> NSView {
-        let name = label(words)
-        let line = NSStackView(views: [name, NSView(), control])
+    func row(_ name: String, _ control: NSView, indent: CGFloat = 0, note: String? = nil) -> NSView {
+        var left: [NSView] = [words(name)]
+        if let note { left.append(keys(note)) }
+        let label = NSStackView(views: left)
+        label.orientation = .horizontal
+        label.spacing = 10
+        label.alignment = .firstBaseline
+        let line = NSStackView(views: [label, NSView(), control])
         line.orientation = .horizontal
         line.alignment = .centerY
         line.edgeInsets = NSEdgeInsets(top: 0, left: indent, bottom: 0, right: 0)
-        line.setHuggingPriority(.defaultLow, for: .horizontal)
         return line
     }
 
-    func toggleRow(_ words: String, _ on: Bool, indent: CGFloat = 0, _ change: @escaping (Bool) -> Void) -> NSView {
-        let toggle = NSSwitch()
-        toggle.controlSize = .small
-        toggle.state = on ? .on : .off
-        let action = act { [weak self] sender in
-            change((sender as? NSSwitch)?.state == .on)
+    /// ON / OFF, the one that isn't so faint
+    func toggleRow(_ name: String, _ on: Bool, indent: CGFloat = 0, note: String? = nil, _ change: @escaping (Bool) -> Void) -> NSView {
+        let control = button(on ? "On" : "Off", alpha: on ? 1 : 0.45) { [weak self] _ in
+            change(!on)
             DispatchQueue.main.async { self?.refresh() }
         }
-        toggle.target = action
-        toggle.action = #selector(Do.fire(_:))
-        return row(words, toggle, indent: indent)
+        return row(name, control, indent: indent, note: note)
     }
 
-    func choiceRow(_ words: String, _ choices: [String], _ chosen: Int, indent: CGFloat = 0, _ change: @escaping (Int) -> Void) -> NSView {
-        let menu = NSPopUpButton(frame: .zero, pullsDown: false)
-        menu.controlSize = .small
-        menu.font = Self.body
-        menu.addItems(withTitles: choices)
-        menu.selectItem(at: chosen)
-        let action = act { [weak self] sender in
-            change((sender as? NSPopUpButton)?.indexOfSelectedItem ?? 0)
-            DispatchQueue.main.async { self?.refresh() }
+    /// the chosen one's name; a click lists the others
+    func choiceRow(_ name: String, _ choices: [String], _ chosen: Int, indent: CGFloat = 0, note: String? = nil, _ change: @escaping (Int) -> Void) -> NSView {
+        let control = button(choices[chosen] + "  ▾") { [weak self] button in
+            guard let self else { return }
+            let menu = NSMenu()
+            for (i, choice) in choices.enumerated() {
+                let item = menu.addItem(withTitle: choice, action: #selector(Do.fire(_:)), keyEquivalent: "")
+                item.state = i == chosen ? .on : .off
+                item.target = self.act { _ in
+                    change(i)
+                    DispatchQueue.main.async { self.refresh() }
+                }
+            }
+            menu.popUp(positioning: menu.item(at: chosen), at: NSPoint(x: 0, y: button.bounds.height), in: button)
         }
-        menu.target = action
-        menu.action = #selector(Do.fire(_:))
-        return row(words, menu, indent: indent)
+        return row(name, control, indent: indent, note: note)
     }
 
-    func buttonRow(_ words: String, _ button: String, indent: CGFloat = 0, _ press: @escaping () -> Void) -> NSView {
-        let control = NSButton(title: button, target: nil, action: nil)
-        control.controlSize = .small
-        control.bezelStyle = .rounded
-        control.font = Self.body
-        let action = act { _ in press() }
-        control.target = action
-        control.action = #selector(Do.fire(_:))
-        return row(words, control, indent: indent)
+    func buttonRow(_ name: String, _ title: String, indent: CGFloat = 0, note: String? = nil, _ press: @escaping () -> Void) -> NSView {
+        row(name, button(title) { _ in press() }, indent: indent, note: note)
     }
 
-    func column(_ views: [NSView], spacing: CGFloat = 10) -> NSStackView {
+    func column(_ views: [NSView], spacing: CGFloat = 10, centred: Bool = false) -> NSStackView {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
-        stack.alignment = .leading
+        stack.alignment = centred ? .centerX : .leading
         stack.spacing = spacing
-        for view in views where !(view is NSTextField) {
+        for view in views where !(view is NSTextField && centred) {
+            if view is NSTextField, !(view as! NSTextField).isEditable, (view as! NSTextField).maximumNumberOfLines == 1 { continue }
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
     }
+}
+
+/// the popup's sheet of paper
+final class PaperView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        Popup.paper.setFill()
+        bounds.fill()
+        if let grain = Popup.grain {
+            NSColor(patternImage: grain).setFill()
+            bounds.fill(using: .sourceOver)
+        }
+        Popup.line.setStroke()
+        let edge = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
+        edge.lineWidth = 2
+        edge.stroke()
+    }
+}
+
+/// the blur behind a popup; a click on it closes the popup
+final class VeilWindow: NSWindow {
+    var onClick: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func rightMouseDown(with event: NSEvent) { onClick?() }
 }
 
 /// a control's action as a closure
@@ -4068,29 +4149,26 @@ final class Do: NSObject {
 
 /// Settings: everything the right-click menu had, in one place.
 final class SettingsPopup: Popup {
-    static let shared = SettingsPopup(width: 520)
+    static let shared = SettingsPopup(width: 560)
 
     override func build() -> NSView {
-        var views: [NSView] = [title("ReDesk"), label("⌃⌥, settings  ·  ⌃⌥/ keys of every app", alpha: 0.45, size: 12)]
+        var views: [NSView] = [heading("Re:Desk")]
         func section(_ name: String, _ rows: [NSView]) {
-            views.append(spacer(10))
-            views.append(heading(name))
+            views.append(divider())
+            views.append(caption(name))
             views.append(contentsOf: rows)
         }
 
-        var desk: [NSView] = [
-            toggleRow("Tile windows  ⌃⌥T", Tiler.shared.on) { Tiler.shared.on = $0 },
-        ]
+        var desk: [NSView] = [toggleRow("Tile windows", Tiler.shared.on, note: "⌃⌥T") { Tiler.shared.on = $0 }]
         if Tiler.shared.on && !AXIsProcessTrusted() {
-            desk.append(buttonRow("Tiling needs Accessibility", "Allow…", indent: 16) { Tiler.openAccessibilitySettings() })
+            desk.append(buttonRow("Tiling needs Accessibility", "Allow", indent: 18) { Tiler.openAccessibilitySettings() })
         }
         let arrangements = Arrangement.allCases
-        desk.append(choiceRow("Arrangement  ⌘1…⌘8", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0, indent: 16) {
-            Tiler.shared.choose(arrangements[$0])
-        })
+        desk.append(choiceRow("Arrangement", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0,
+                              indent: 18, note: "⌘1…⌘8") { Tiler.shared.choose(arrangements[$0]) })
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
-            toggleRow("Dark appearance  ⌘⇧T", Appearance.dark) { if $0 != Appearance.dark { Appearance.toggle() } },
+            toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
             toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {
                     SMAppService.openSystemSettingsLoginItems()
@@ -4101,18 +4179,18 @@ final class SettingsPopup: Popup {
 
         var wallpaper: [NSView] = []
         if let progress = YouTubeWallpaper.progress {
-            wallpaper.append(row("YouTube", label(progress, alpha: 0.6)))
+            wallpaper.append(row("YouTube", words(progress, alpha: 0.6)))
         } else {
-            wallpaper.append(buttonRow("Wallpaper from YouTube", "Add…") { [weak self] in self?.close(); YouTubeWallpaper.ask() })
+            wallpaper.append(buttonRow("Wallpaper from YouTube", "Add") { [weak self] in self?.close(); YouTubeWallpaper.ask() })
         }
         if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
             wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in YouTubeWallpaper.removeCurrent(); self?.refresh() })
         }
-        wallpaper.append(toggleRow("Video wallpaper stands still  ⌘⇧M", LiveWallpaper.shared.frozen) { LiveWallpaper.shared.frozen = $0 })
+        wallpaper.append(toggleRow("Video wallpaper stands still", LiveWallpaper.shared.frozen, note: "⌘⇧M") { LiveWallpaper.shared.frozen = $0 })
         section("Wallpaper", wallpaper)
 
         var screen: [NSView] = [
-            buttonRow("Lock screen  ⌃⌘L", "Lock") { [weak self] in self?.close(); LockScreen.shared.show() },
+            buttonRow("Lock screen", "Lock", note: "⌃⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
             toggleRow("Snap or clap to lock", Snap.shared.on) { Snap.shared.on = $0 },
         ]
         if LidLight.shared.available {
@@ -4125,120 +4203,106 @@ final class SettingsPopup: Popup {
             if LidTaps.shared.taught {
                 taps.append(toggleRow("Taps on the screen open apps", LidTaps.shared.on) { LidTaps.shared.on = $0 })
             }
-            taps.append(buttonRow(LidTaps.shared.taught ? "Teach the screen taps again" : "Teach the screen taps", "Teach…", indent: LidTaps.shared.taught ? 16 : 0) {
-                [weak self] in self?.close(); LidTaps.shared.teach()
-            })
+            taps.append(buttonRow(LidTaps.shared.taught ? "Teach the screen taps again" : "Teach the screen taps", "Teach",
+                                  indent: LidTaps.shared.taught ? 18 : 0) { [weak self] in self?.close(); LidTaps.shared.teach() })
             taps.append(toggleRow("Knocks on the Mac", Knocks.shared.on) { Knocks.shared.on = $0 })
             if Knocks.shared.on {
                 let all = KnockAction.allCases
                 for count in Knocks.counts {
-                    taps.append(choiceRow("\(count) knocks", all.map(\.title), all.firstIndex(of: Knocks.shared.action(count)) ?? 0, indent: 16) {
+                    taps.append(choiceRow("\(count) knocks", all.map(\.title), all.firstIndex(of: Knocks.shared.action(count)) ?? 0, indent: 18) {
                         Knocks.shared.set(count, all[$0])
                     })
                 }
-                taps.append(choiceRow("Sensitivity", Knocks.sensitivities, Knocks.shared.sensitivity, indent: 16) { Knocks.shared.sensitivity = $0 })
+                taps.append(choiceRow("Sensitivity", Knocks.sensitivities, Knocks.shared.sensitivity, indent: 18) { Knocks.shared.sensitivity = $0 })
             }
             section("Taps & knocks", taps)
         }
 
-        views.append(spacer(14))
-        views.append(buttonRow("ReDesk", "Quit") { NSApp.terminate(nil) })
-        return column(views)
-    }
-
-    private func spacer(_ height: CGFloat) -> NSView {
-        let view = NSView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.heightAnchor.constraint(equalToConstant: height).isActive = true
-        return view
+        views.append(divider())
+        let footer = NSStackView(views: [words("⌃⌥, settings  ·  ⌃⌥/ keys", size: 13, alpha: 0.4), NSView(), button("Quit") { _ in NSApp.terminate(nil) }])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        views.append(footer)
+        let stack = column(views, spacing: 12)
+        stack.setCustomSpacing(26, after: views[0])
+        return stack
     }
 }
 
-/// Keys: each Re app's keys, an app at a time (← → or the names at the top).
+/// Keys: every Re app's keys at once, an app to a column.
 final class KeysPopup: Popup {
-    static let shared = KeysPopup(width: 600)
+    static let shared = KeysPopup(width: 1400)
 
     typealias Keys = [(String, String)]
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
-        ("ReDesk", [
+        ("Re:Desk", [
             (nil, [("⌃⌥,", "settings"), ("⌃⌥/", "these keys"), ("⌃⌘L", "lock screen"), ("⌘⇧T", "light / dark"),
-                   ("⌘⇧M", "video wallpaper stands still / moves")]),
-            ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window that way"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with that neighbour (tiling)"),
-                         ("⌃⌥⌘ ← → ↑ ↓", "resize the focused window (tiling)"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
-                         ("⌃⌥↩", "the focused window becomes the main one")]),
-            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement (tiling on)"), ("⌘↑ / ⌘↓", "fill the screen / the desk's middle"),
+                   ("⌘⇧M", "video wallpaper still / moving")]),
+            ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
+                         ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
+                         ("⌃⌥↩", "the window becomes the main one")]),
+            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
-            ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen (right at the screen)")]),
+            ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
-        ("ReFile", [
-            (nil, [("↑ ↓", "select"), ("→ / Enter", "open"), ("←", "back to the folder above"), ("/", "search"), ("C / L", "views"),
+        ("Re:File", [
+            (nil, [("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"),
                    ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
         ]),
-        ("ReSurf", [
+        ("Re:Surf", [
             (nil, [("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⌘[ / ⌘]", "back / forward"),
-                   ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page (Esc puts it back)"), ("⌘E", "e-ink"),
-                   ("⌘I", "info"), ("⌘J", "ReChat")]),
-            ("Search results", [("A / I / V", "all / images / videos"), ("F", "the same search in Marginalia"),
-                                ("← / →", "previous / next page"), ("↑ ↓  Enter", "choose, open")]),
+                   ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘E", "e-ink"), ("⌘I", "info"), ("⌘J", "ReChat")]),
+            ("Search", [("A / I / V", "all / images / videos"), ("F", "the same in Marginalia"), ("← / →", "previous / next page"),
+                        ("↑ / ↓  Enter", "choose, open")]),
             ("ReChat", [("Enter", "send"), ("⇧Enter", "new line")]),
         ]),
-        ("ReSound", [
-            (nil, [("Space", "play / pause"), ("⏮ ⏯ ⏭  (F7 F8 F9)", "previous / play-pause / next"), ("↑ ↓ ← →", "move"),
-                   ("Enter", "play"), ("1 – 4", "tabs (1 songs, 2 radio)"), ("/", "search"), ("S / R", "shuffle / repeat"),
-                   ("Q", "queue"), ("N", "new playlist"), ("I", "info")]),
+        ("Re:Sound", [
+            (nil, [("Space", "play / pause"), ("F7 F8 F9", "previous / play / next"), ("↑ ↓ ← →", "move"), ("Enter", "play"),
+                   ("1 – 4", "tabs"), ("/", "search"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("N", "new playlist"), ("I", "info")]),
         ]),
-        ("ReNote", [
-            ("Notes", [("↑ ↓", "select a note"), ("← →", "previous / next space"), ("N", "new note"), ("E / Enter", "edit"),
-                       ("/  or  ⌘F", "search"), ("Backspace", "delete (Enter yes, Esc no)"), ("Esc", "home")]),
+        ("Re:Note", [
+            ("Notes", [("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
+                       ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
             ("A note", [("⌘S", "save"), ("⌥← / ⌥→", "previous / next note"), ("Esc", "back")]),
-            ("Writing", [("⌘B", "highlight"), ("⌘Z", "undo"), ("⌘⇧Z  or  ⌃Y", "redo")]),
-            ("Home search", [("↑ ↓  Enter", "choose, open"), ("Esc", "clear")]),
-        ]),
-        ("ReBook", [
-            (nil, [("↑ ↓", "select"), ("Enter", "read"), ("← →  Space", "turn pages"), ("F", "full screen"), ("Esc", "back"),
-                   ("/", "search"), ("A", "add a book"), ("I", "info"), ("Backspace", "remove")]),
+            ("Writing", [("⌘B", "highlight"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
         ]),
     ]
 
-    private var app = UserDefaults.standard.integer(forKey: "keysApp") {
-        didSet { UserDefaults.standard.set(app, forKey: "keysApp") }
-    }
-
-    override func keyDown(with event: NSEvent) {
-        switch Int(event.keyCode) {
-        case kVK_LeftArrow: app = (app + Self.apps.count - 1) % Self.apps.count; refresh()
-        case kVK_RightArrow: app = (app + 1) % Self.apps.count; refresh()
-        default: super.keyDown(with: event)
-        }
-    }
+    override func width(on screen: NSRect) -> CGFloat { min(1500, screen.width - 80) }
 
     override func build() -> NSView {
-        app = min(max(app, 0), Self.apps.count - 1)
-        let tabs = NSSegmentedControl(labels: Self.apps.map(\.name), trackingMode: .selectOne, target: nil, action: nil)
-        tabs.selectedSegment = app
-        tabs.font = Self.body
-        let action = act { [weak self] sender in
-            self?.app = (sender as? NSSegmentedControl)?.selectedSegment ?? 0
-            DispatchQueue.main.async { self?.refresh() }
+        var columns: [NSView] = []
+        for app in Self.apps {
+            var views: [NSView] = [heading(app.name), divider()]
+            for (name, list) in app.parts {
+                if let name { views.append(caption(name)) }
+                for (key, what) in list {
+                    let line = NSStackView(views: [keys(key), NSView(), words(what, size: 14)])
+                    line.orientation = .horizontal
+                    line.alignment = .firstBaseline
+                    line.spacing = 12
+                    views.append(line)
+                }
+            }
+            let column = column(views, spacing: 9)
+            for (i, view) in views.enumerated() where view is NSTextField && i > 0 { column.setCustomSpacing(9, after: views[i - 1]) }
+            column.setCustomSpacing(16, after: views[0])
+            column.setCustomSpacing(16, after: views[1])
+            columns.append(column)
         }
-        tabs.target = action
-        tabs.action = #selector(Do.fire(_:))
-        var views: [NSView] = [title("Keys"), label("← → another app  ·  Esc closes", alpha: 0.45, size: 12), tabs]
-        for (name, keys) in Self.apps[app].parts {
-            if let name { views.append(heading(name)) }
-            let grid = NSGridView(views: keys.map { key, what in
-                let k = label(key, alpha: 0.95)
-                k.font = .systemFont(ofSize: 13, weight: .medium)
-                return [k, label(what, alpha: 0.7)]
-            })
-            grid.columnSpacing = 22
-            grid.rowSpacing = 7
-            grid.column(at: 0).width = 150
-            views.append(grid)
-        }
-        let stack = column(views, spacing: 12)
-        stack.setCustomSpacing(18, after: tabs)
-        return stack
+        let row = NSStackView(views: columns)
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.distribution = .fillEqually
+        row.spacing = 44
+        let footer = words("⌃⌥/ or Esc closes  ·  ⌃⌥, settings", size: 13, alpha: 0.4)
+        let all = NSStackView(views: [row, footer])
+        all.orientation = .vertical
+        all.alignment = .centerX
+        all.spacing = 30
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalTo: all.widthAnchor).isActive = true
+        return all
     }
 }
 
@@ -4426,10 +4490,7 @@ if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < Co
         }
     }
     render(SettingsPopup.shared, "settings.png")
-    for i in 0..<KeysPopup.apps.count {
-        UserDefaults.standard.set(i, forKey: "keysApp")
-        render(KeysPopup(width: 600), "keys-\(KeysPopup.apps[i].name).png")
-    }
+    render(KeysPopup.shared, "keys.png")
     exit(0)
 }
 
