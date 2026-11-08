@@ -3369,12 +3369,14 @@ final class LidTapTeacher: NSView {
 // ── a snap of the fingers locks the screen ──
 
 /// The microphone, listened to for a snap of the fingers or a clap right at the screen: a click so loud only
-/// one that near makes it (0.2 of full scale, a snap at the screen measured 0.7, noise in the room up to 0.05), mostly
+/// one that near makes it (`loud`), mostly
 /// high (over 2 kHz), short (gone within 40 ms) and alone (quiet just before). Then, if nothing was typed or
 /// clicked just before or after (a key's click is much like it), the lock screen. Nothing is recorded:
 /// each 2.5 ms of sound is only measured. While it listens macOS shows its orange microphone dot.
 final class Snap {
     static let shared = Snap()
+    /// how loud a snap must be (of full scale): a snap or clap at the screen measured 0.2 to 1, the room's noise up to 0.05
+    static let loud: Float = 0.1
 
     var on: Bool {
         get { UserDefaults.standard.object(forKey: "snapLock") as? Bool ?? true }
@@ -3484,16 +3486,16 @@ final class Snap {
             let before = ((start - 40)..<(start - 1)).map { at(loud, $0) }.max() ?? 0
             let after = ((start + 16)..<(start + 24)).map { at(loud, $0) }.max() ?? 0
             let high = at(share, start)
-            let snap = before < peak * 0.25 && after < peak * 0.3 && high > 0.35
+            let snap = peak > Snap.loud && before < peak * 0.25 && after < peak * 0.3 && high > 0.35
             let line = String(format: "%@: peak %.3f (usual %.4f), before %.2f, after %.2f, high %.2f",
-                              snap ? "snap" : "no snap", peak, usual, before / peak, after / peak, high)
+                              snap ? "snap" : peak > Snap.loud ? "no snap" : "too soft", peak, usual, before / peak, after / peak, high)
             DispatchQueue.main.async {
                 Snap.log(line)
                 if snap { self.snapped() }
             }
             return
         }
-        guard frames > 400, n > quietUntil, level > max(usual * 12, 0.2) else { return }
+        guard frames > 400, n > quietUntil, level > max(usual * 12, 0.03) else { return }
         due = n
     }
 
