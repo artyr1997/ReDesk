@@ -1531,6 +1531,9 @@ class DeskView: NSView {
         let lock = menu.addItem(withTitle: "Lock Screen", action: #selector(lockScreen), keyEquivalent: "l")
         lock.keyEquivalentModifierMask = [.command, .control]
         lock.target = self
+        let snap = menu.addItem(withTitle: "Snap to Lock", action: #selector(toggleSnap), keyEquivalent: "")
+        snap.target = self
+        snap.state = Snap.shared.on ? .on : .off
         menu.addItem(.separator())
         let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
@@ -1552,6 +1555,8 @@ class DeskView: NSView {
     @objc private func toggleLidLight() { LidLight.shared.on.toggle() }
 
     @objc private func toggleLidTaps() { LidTaps.shared.on.toggle() }
+
+    @objc private func toggleSnap() { Snap.shared.on.toggle() }
 
     @objc private func teachLidTaps() { LidTaps.shared.teach() }
 
@@ -3361,6 +3366,171 @@ final class LidTapTeacher: NSView {
     }
 }
 
+// ── a snap of the fingers locks the screen ──
+
+/// The microphone, listened to for a snap of the fingers: a click far above the room's usual sound, mostly
+/// high (over 2 kHz), short (gone within 40 ms) and alone (quiet just before). Then, if nothing was typed or
+/// clicked just before or after (a key's click is much like it), the lock screen. Nothing is recorded:
+/// each 2.5 ms of sound is only measured. While it listens macOS shows its orange microphone dot.
+final class Snap {
+    static let shared = Snap()
+
+    var on: Bool {
+        get { UserDefaults.standard.object(forKey: "snapLock") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "snapLock"); newValue ? start() : stop() }
+    }
+
+    private let engine = AVAudioEngine()
+    private var running = false
+    private var monitor: Any?
+    private var lastInput = Date.distantPast
+
+    func start() {
+        guard on, !running else { return }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                DispatchQueue.main.async { if granted { self.start() } }
+            }
+            return
+        case .authorized: break
+        default: return
+        }
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { return }
+        rate = format.sampleRate
+        frame = Int(rate / 400)
+        let rc = 1 / (2 * Double.pi * 2000), dt = 1 / rate
+        alpha = Float(rc / (rc + dt))
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in self?.hear(buffer) }
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            return
+        }
+        running = true
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            self?.lastInput = Date()
+        }
+    }
+
+    func stop() {
+        guard running else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        running = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    // ── on the audio thread ──
+
+    private var rate = 48000.0
+    private var frame = 120
+    private var alpha: Float = 0.8
+    private var previous: Float = 0
+    private var high: Float = 0
+    private var sumHigh: Float = 0
+    private var sumAll: Float = 0
+    private var inFrame = 0
+    /// each 2.5 ms: how loud its high part was, and how much of it was high
+    private var loud = [Float](repeating: 0, count: 256)
+    private var share = [Float](repeating: 0, count: 256)
+    private var frames = 0
+    private var due: Int?
+    private var quietUntil = 0
+    private var blocks = [Float](repeating: 0, count: 50)
+    private var block: Float = 0
+    private var usual: Float = 0.001
+
+    private func hear(_ buffer: AVAudioPCMBuffer) {
+        guard let samples = buffer.floatChannelData?[0] else { return }
+        for i in 0..<Int(buffer.frameLength) {
+            let x = samples[i]
+            high = alpha * (high + x - previous)
+            previous = x
+            sumHigh += high * high
+            sumAll += x * x
+            inFrame += 1
+            if inFrame == frame { measured() }
+        }
+    }
+
+    private func at(_ ring: [Float], _ n: Int) -> Float { ring[(n + 256 * 64) % 256] }
+
+    private func measured() {
+        let level = (sumHigh / Float(frame)).squareRoot()
+        let all = (sumAll / Float(frame)).squareRoot()
+        sumHigh = 0; sumAll = 0; inFrame = 0
+        let n = frames
+        loud[n % 256] = level
+        share[n % 256] = all > 0 ? level / all : 0
+        frames += 1
+        // the room's usual: the strongest of each 20 ms over the last second, the quieter third's top
+        block = max(block, level)
+        if frames % 8 == 0 {
+            blocks[(frames / 8) % blocks.count] = block
+            block = 0
+            usual = blocks.sorted()[blocks.count / 3]
+        }
+        if let start = due {
+            guard n >= start + 24 else { return }
+            due = nil
+            quietUntil = n + 80
+            let peak = (start..<(start + 4)).map { at(loud, $0) }.max() ?? 0
+            let before = ((start - 40)..<(start - 1)).map { at(loud, $0) }.max() ?? 0
+            let after = ((start + 16)..<(start + 24)).map { at(loud, $0) }.max() ?? 0
+            let high = at(share, start)
+            let snap = before < peak * 0.25 && after < peak * 0.3 && high > 0.5
+            let line = String(format: "%@: peak %.3f (usual %.4f), before %.2f, after %.2f, high %.2f",
+                              snap ? "snap" : "no snap", peak, usual, before / peak, after / peak, high)
+            DispatchQueue.main.async {
+                Snap.log(line)
+                if snap { self.snapped() }
+            }
+            return
+        }
+        guard frames > 400, n > quietUntil, level > max(usual * 12, 0.01) else { return }
+        due = n
+    }
+
+    // ── on the main thread ──
+
+    private var heardAt = Date.distantPast
+
+    /// a snap: the lock screen, unless keys or clicks were near it (looked at again a quarter second on)
+    private func snapped() {
+        heardAt = Date()
+        let at = heardAt
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.heardAt == at else { return }
+            let gap = abs(self.lastInput.timeIntervalSince(at))
+            guard gap > 0.4, !LockScreen.shared.shown, CGDisplayIsAsleep(CGMainDisplayID()) == 0 else {
+                return Snap.log(String(format: "not locked: input %.2f s away, locked already %@", gap, LockScreen.shared.shown ? "yes" : "no"))
+            }
+            Snap.log("locked")
+            LockScreen.shared.show()
+        }
+    }
+
+    /// ~/Library/Application Support/ReDesk/Snap.log: each click heard, measured, and what came of it
+    static func log(_ line: String) {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ReDesk")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Snap.log")
+        guard let data = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+}
+
 final class Desk: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         InkCursors.restore()
@@ -3459,6 +3629,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         CommandKeys.install()
         LidLight.shared.start()
         LidTaps.shared.start()
+        Snap.shared.start()
     }
 
     private var night = false
