@@ -616,6 +616,8 @@ enum HotKeys {
             case 31: Appearance.toggle()
             case 32: LiveWallpaper.shared.frozen.toggle()
             case 33: LockScreen.shared.show()
+            case 34: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
+            case 35: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
             default: break
             }
             return noErr
@@ -624,7 +626,8 @@ enum HotKeys {
         let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
             + commanded.map { ($0.id, $0.key, modifiers | UInt32(cmdKey)) }
             + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey)),
-               (UInt32(33), kVK_ANSI_L, UInt32(cmdKey | controlKey))]
+               (UInt32(33), kVK_ANSI_L, UInt32(cmdKey | controlKey)),
+               (UInt32(34), kVK_ANSI_Comma, modifiers), (UInt32(35), kVK_ANSI_Slash, modifiers)]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
@@ -1473,151 +1476,9 @@ class DeskView: NSView {
     /// items of this piece that go above the common ones
     func menuItems() -> [NSMenuItem] { [] }
 
+    /// a right click anywhere on the desk: the settings
     override func rightMouseDown(with event: NSEvent) {
-        let menu = NSMenu()
-        let own = menuItems()
-        own.forEach(menu.addItem)
-        if !own.isEmpty { menu.addItem(.separator()) }
-        let tiling = menu.addItem(withTitle: "Tile Windows", action: #selector(toggleTiling), keyEquivalent: "")
-        tiling.target = self
-        tiling.state = Tiler.shared.on ? .on : .off
-        if Tiler.shared.on && !AXIsProcessTrusted() {
-            let allow = menu.addItem(withTitle: "Allow in Accessibility…", action: #selector(allowAccessibility), keyEquivalent: "")
-            allow.target = self
-            allow.indentationLevel = 1
-        }
-        for arrangement in Arrangement.allCases {
-            let number = Arrangement.allCases.firstIndex(of: arrangement)! + 1
-            let item = menu.addItem(withTitle: arrangement.title, action: #selector(arrange(_:)), keyEquivalent: "\(number)")
-            item.keyEquivalentModifierMask = .command
-            item.target = self
-            item.representedObject = arrangement.rawValue
-            item.indentationLevel = 1
-            item.state = Tiler.shared.on && Tiler.shared.arrangement == arrangement ? .on : .off
-        }
-        menu.addItem(.separator())
-        let cursors = menu.addItem(withTitle: "Ink Cursors", action: #selector(toggleCursors), keyEquivalent: "")
-        cursors.target = self
-        cursors.state = InkCursors.on ? .on : .off
-        if LidLight.shared.available {
-            let lid = menu.addItem(withTitle: "Brightness by Lid", action: #selector(toggleLidLight), keyEquivalent: "")
-            lid.target = self
-            lid.state = LidLight.shared.on ? .on : .off
-        }
-        if LidTaps.shared.available {
-            if LidTaps.shared.taught {
-                let taps = menu.addItem(withTitle: "Lid Taps Open Apps", action: #selector(toggleLidTaps), keyEquivalent: "")
-                taps.target = self
-                taps.state = LidTaps.shared.on ? .on : .off
-            }
-            let teach = menu.addItem(withTitle: LidTaps.shared.taught ? "Teach Lid Taps Again…" : "Teach Lid Taps…", action: #selector(teachLidTaps), keyEquivalent: "")
-            teach.target = self
-            teach.indentationLevel = LidTaps.shared.taught ? 1 : 0
-        }
-        if Knocks.shared.available {
-            let knocks = menu.addItem(withTitle: "Knocks", action: #selector(toggleKnocks), keyEquivalent: "")
-            knocks.target = self
-            knocks.state = Knocks.shared.on ? .on : .off
-            if Knocks.shared.on {
-                for count in Knocks.counts {
-                    let item = menu.addItem(withTitle: "\(count) Knocks: \(Knocks.shared.action(count).title)", action: nil, keyEquivalent: "")
-                    item.indentationLevel = 1
-                    let choices = NSMenu()
-                    for action in KnockAction.allCases {
-                        let choice = choices.addItem(withTitle: action.title, action: #selector(chooseKnock(_:)), keyEquivalent: "")
-                        choice.target = self
-                        choice.representedObject = "\(count):\(action.rawValue)"
-                        choice.state = Knocks.shared.action(count) == action ? .on : .off
-                    }
-                    item.submenu = choices
-                }
-                let feel = menu.addItem(withTitle: "Sensitivity: \(Knocks.sensitivities[Knocks.shared.sensitivity])", action: nil, keyEquivalent: "")
-                feel.indentationLevel = 1
-                let levels = NSMenu()
-                for (i, name) in Knocks.sensitivities.enumerated() {
-                    let level = levels.addItem(withTitle: name, action: #selector(knockSensitivity(_:)), keyEquivalent: "")
-                    level.target = self
-                    level.tag = i
-                    level.state = Knocks.shared.sensitivity == i ? .on : .off
-                }
-                feel.submenu = levels
-            }
-        }
-        let theme = menu.addItem(withTitle: "Dark Appearance", action: #selector(toggleAppearance), keyEquivalent: "t")
-        theme.keyEquivalentModifierMask = [.command, .shift]
-        theme.target = self
-        theme.state = Appearance.dark ? .on : .off
-        if let progress = YouTubeWallpaper.progress {
-            let item = menu.addItem(withTitle: "YouTube: \(progress)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-        } else {
-            let item = menu.addItem(withTitle: "Wallpaper from YouTube…", action: #selector(youtubeWallpaper), keyEquivalent: "")
-            item.target = self
-        }
-        if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
-            let item = menu.addItem(withTitle: "Remove This Wallpaper", action: #selector(removeWallpaper), keyEquivalent: "")
-            item.target = self
-        }
-        let lock = menu.addItem(withTitle: "Lock Screen", action: #selector(lockScreen), keyEquivalent: "l")
-        lock.keyEquivalentModifierMask = [.command, .control]
-        lock.target = self
-        let snap = menu.addItem(withTitle: "Snap to Lock", action: #selector(toggleSnap), keyEquivalent: "")
-        snap.target = self
-        snap.state = Snap.shared.on ? .on : .off
-        menu.addItem(.separator())
-        let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
-        login.target = self
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(withTitle: "Quit ReDesk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
-    }
-
-    @objc private func toggleTiling() { Tiler.shared.on.toggle() }
-
-    @objc private func lockScreen() { LockScreen.shared.show() }
-
-    @objc private func youtubeWallpaper() { YouTubeWallpaper.ask() }
-
-    @objc private func removeWallpaper() { YouTubeWallpaper.removeCurrent() }
-
-    @objc private func toggleCursors() { InkCursors.on.toggle() }
-
-    @objc private func toggleLidLight() { LidLight.shared.on.toggle() }
-
-    @objc private func toggleLidTaps() { LidTaps.shared.on.toggle() }
-
-    @objc private func teachLidTaps() { LidTaps.shared.teach() }
-
-    @objc private func toggleKnocks() { Knocks.shared.on.toggle() }
-
-    @objc private func chooseKnock(_ item: NSMenuItem) {
-        let parts = (item.representedObject as? String ?? "").split(separator: ":")
-        guard parts.count == 2, let count = Int(parts[0]), let action = KnockAction(rawValue: String(parts[1])) else { return }
-        Knocks.shared.set(count, action)
-    }
-
-    @objc private func knockSensitivity(_ item: NSMenuItem) { Knocks.shared.sensitivity = item.tag }
-
-    @objc private func toggleSnap() { Snap.shared.on.toggle() }
-
-    @objc private func toggleAppearance() { Appearance.toggle() }
-
-    @objc private func allowAccessibility() { Tiler.openAccessibilitySettings() }
-
-    /// Picking an arrangement also turns tiling on.
-    @objc private func arrange(_ item: NSMenuItem) {
-        guard let arrangement = Arrangement(rawValue: item.representedObject as? String ?? "") else { return }
-        Tiler.shared.choose(arrangement)
-    }
-
-    /// Starting with the Mac is up to the user; macOS may ask to approve it in Login Items.
-    @objc private func toggleLogin() {
-        let service = SMAppService.mainApp
-        do {
-            if service.status == .enabled { try service.unregister() } else { try service.register() }
-        } catch {
-            SMAppService.openSystemSettingsLoginItems()
-        }
+        SettingsPopup.shared.show()
     }
 }
 
@@ -4039,6 +3900,348 @@ final class Snap {
     }
 }
 
+// ── the two popups: Settings (⌃⌥, or a right click) and Keys (⌃⌥/), a guide to every Re app's keys ──
+
+/// A popup over everything, in the middle of the screen: dark glass, the desk's ink. Esc, the same keys
+/// again, or a click elsewhere closes it.
+class Popup: NSPanel {
+    private let glass = NSVisualEffectView()
+    /// the controls' actions, kept while they're shown
+    var actions: [Do] = []
+
+    init(width: CGFloat) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered, defer: false)
+        level = .modalPanel
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        isMovableByWindowBackground = true
+        hidesOnDeactivate = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        appearance = NSAppearance(named: .darkAqua)
+        glass.material = .hudWindow
+        glass.state = .active
+        glass.blendingMode = .behindWindow
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = 18
+        glass.layer?.masksToBounds = true
+        contentView = glass
+    }
+
+    override var canBecomeKey: Bool { true }
+    override func cancelOperation(_ sender: Any?) { close() }
+    override func resignKey() { super.resignKey(); close() }
+
+    /// the popup's content: built anew each time it shows (and when a choice changes what it shows)
+    func build() -> NSView { NSView() }
+
+    func toggle() { isVisible ? close() : show() }
+
+    func show() {
+        refresh()
+        NSApp.activate(ignoringOtherApps: true)
+        makeKeyAndOrderFront(nil)
+    }
+
+    func refresh() {
+        actions = []
+        let content = build()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        glass.subviews.forEach { $0.removeFromSuperview() }
+        glass.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: glass.leadingAnchor, constant: 28),
+            content.trailingAnchor.constraint(equalTo: glass.trailingAnchor, constant: -28),
+            content.topAnchor.constraint(equalTo: glass.topAnchor, constant: 26),
+        ])
+        glass.layoutSubtreeIfNeeded()
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let height = min(content.fittingSize.height + 52, screen.height - 40)
+        let width = frame.width
+        setFrame(NSRect(x: screen.midX - width / 2, y: screen.midY - height / 2, width: width, height: height), display: true)
+    }
+
+    // ── pieces ──
+
+    static let body = NSFont(name: "NotoSansJP-Regular", size: 13) ?? .systemFont(ofSize: 13, weight: .light)
+
+    func title(_ words: String) -> NSTextField {
+        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
+            .font: NSFont(name: "NotoSansJP-Regular", size: 18) ?? .systemFont(ofSize: 18, weight: .light),
+            .foregroundColor: ink(0.9), .kern: 4,
+        ]))
+        return field
+    }
+
+    func heading(_ words: String) -> NSTextField {
+        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
+            .font: lockLetters, .foregroundColor: ink(0.45), .kern: 2.5,
+        ]))
+        return field
+    }
+
+    func label(_ words: String, alpha: CGFloat = 0.85, size: CGFloat = 13) -> NSTextField {
+        let field = NSTextField(labelWithString: words)
+        field.font = size == 13 ? Self.body : NSFont(name: "NotoSansJP-Regular", size: size) ?? .systemFont(ofSize: size)
+        field.textColor = ink(alpha)
+        field.lineBreakMode = .byWordWrapping
+        field.maximumNumberOfLines = 0
+        return field
+    }
+
+    func act(_ run: @escaping (Any) -> Void) -> Do {
+        let action = Do(run)
+        actions.append(action)
+        return action
+    }
+
+    /// a line: the words on the left, the control on the right
+    func row(_ words: String, _ control: NSView, indent: CGFloat = 0) -> NSView {
+        let name = label(words)
+        let line = NSStackView(views: [name, NSView(), control])
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.edgeInsets = NSEdgeInsets(top: 0, left: indent, bottom: 0, right: 0)
+        line.setHuggingPriority(.defaultLow, for: .horizontal)
+        return line
+    }
+
+    func toggleRow(_ words: String, _ on: Bool, indent: CGFloat = 0, _ change: @escaping (Bool) -> Void) -> NSView {
+        let toggle = NSSwitch()
+        toggle.controlSize = .small
+        toggle.state = on ? .on : .off
+        let action = act { [weak self] sender in
+            change((sender as? NSSwitch)?.state == .on)
+            DispatchQueue.main.async { self?.refresh() }
+        }
+        toggle.target = action
+        toggle.action = #selector(Do.fire(_:))
+        return row(words, toggle, indent: indent)
+    }
+
+    func choiceRow(_ words: String, _ choices: [String], _ chosen: Int, indent: CGFloat = 0, _ change: @escaping (Int) -> Void) -> NSView {
+        let menu = NSPopUpButton(frame: .zero, pullsDown: false)
+        menu.controlSize = .small
+        menu.font = Self.body
+        menu.addItems(withTitles: choices)
+        menu.selectItem(at: chosen)
+        let action = act { [weak self] sender in
+            change((sender as? NSPopUpButton)?.indexOfSelectedItem ?? 0)
+            DispatchQueue.main.async { self?.refresh() }
+        }
+        menu.target = action
+        menu.action = #selector(Do.fire(_:))
+        return row(words, menu, indent: indent)
+    }
+
+    func buttonRow(_ words: String, _ button: String, indent: CGFloat = 0, _ press: @escaping () -> Void) -> NSView {
+        let control = NSButton(title: button, target: nil, action: nil)
+        control.controlSize = .small
+        control.bezelStyle = .rounded
+        control.font = Self.body
+        let action = act { _ in press() }
+        control.target = action
+        control.action = #selector(Do.fire(_:))
+        return row(words, control, indent: indent)
+    }
+
+    func column(_ views: [NSView], spacing: CGFloat = 10) -> NSStackView {
+        let stack = NSStackView(views: views)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = spacing
+        for view in views where !(view is NSTextField) {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return stack
+    }
+}
+
+/// a control's action as a closure
+final class Do: NSObject {
+    let run: (Any) -> Void
+    init(_ run: @escaping (Any) -> Void) { self.run = run }
+    @objc func fire(_ sender: Any) { run(sender) }
+}
+
+/// Settings: everything the right-click menu had, in one place.
+final class SettingsPopup: Popup {
+    static let shared = SettingsPopup(width: 520)
+
+    override func build() -> NSView {
+        var views: [NSView] = [title("ReDesk"), label("⌃⌥, settings  ·  ⌃⌥/ keys of every app", alpha: 0.45, size: 12)]
+        func section(_ name: String, _ rows: [NSView]) {
+            views.append(spacer(10))
+            views.append(heading(name))
+            views.append(contentsOf: rows)
+        }
+
+        var desk: [NSView] = [
+            toggleRow("Tile windows  ⌃⌥T", Tiler.shared.on) { Tiler.shared.on = $0 },
+        ]
+        if Tiler.shared.on && !AXIsProcessTrusted() {
+            desk.append(buttonRow("Tiling needs Accessibility", "Allow…", indent: 16) { Tiler.openAccessibilitySettings() })
+        }
+        let arrangements = Arrangement.allCases
+        desk.append(choiceRow("Arrangement  ⌘1…⌘8", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0, indent: 16) {
+            Tiler.shared.choose(arrangements[$0])
+        })
+        desk += [
+            toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
+            toggleRow("Dark appearance  ⌘⇧T", Appearance.dark) { if $0 != Appearance.dark { Appearance.toggle() } },
+            toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
+                do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            },
+        ]
+        section("Desk", desk)
+
+        var wallpaper: [NSView] = []
+        if let progress = YouTubeWallpaper.progress {
+            wallpaper.append(row("YouTube", label(progress, alpha: 0.6)))
+        } else {
+            wallpaper.append(buttonRow("Wallpaper from YouTube", "Add…") { [weak self] in self?.close(); YouTubeWallpaper.ask() })
+        }
+        if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
+            wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in YouTubeWallpaper.removeCurrent(); self?.refresh() })
+        }
+        wallpaper.append(toggleRow("Video wallpaper stands still  ⌘⇧M", LiveWallpaper.shared.frozen) { LiveWallpaper.shared.frozen = $0 })
+        section("Wallpaper", wallpaper)
+
+        var screen: [NSView] = [
+            buttonRow("Lock screen  ⌃⌘L", "Lock") { [weak self] in self?.close(); LockScreen.shared.show() },
+            toggleRow("Snap or clap to lock", Snap.shared.on) { Snap.shared.on = $0 },
+        ]
+        if LidLight.shared.available {
+            screen.append(toggleRow("Brightness by lid", LidLight.shared.on) { LidLight.shared.on = $0 })
+        }
+        section("Screen", screen)
+
+        if Knocks.shared.available {
+            var taps: [NSView] = []
+            if LidTaps.shared.taught {
+                taps.append(toggleRow("Taps on the screen open apps", LidTaps.shared.on) { LidTaps.shared.on = $0 })
+            }
+            taps.append(buttonRow(LidTaps.shared.taught ? "Teach the screen taps again" : "Teach the screen taps", "Teach…", indent: LidTaps.shared.taught ? 16 : 0) {
+                [weak self] in self?.close(); LidTaps.shared.teach()
+            })
+            taps.append(toggleRow("Knocks on the Mac", Knocks.shared.on) { Knocks.shared.on = $0 })
+            if Knocks.shared.on {
+                let all = KnockAction.allCases
+                for count in Knocks.counts {
+                    taps.append(choiceRow("\(count) knocks", all.map(\.title), all.firstIndex(of: Knocks.shared.action(count)) ?? 0, indent: 16) {
+                        Knocks.shared.set(count, all[$0])
+                    })
+                }
+                taps.append(choiceRow("Sensitivity", Knocks.sensitivities, Knocks.shared.sensitivity, indent: 16) { Knocks.shared.sensitivity = $0 })
+            }
+            section("Taps & knocks", taps)
+        }
+
+        views.append(spacer(14))
+        views.append(buttonRow("ReDesk", "Quit") { NSApp.terminate(nil) })
+        return column(views)
+    }
+
+    private func spacer(_ height: CGFloat) -> NSView {
+        let view = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return view
+    }
+}
+
+/// Keys: each Re app's keys, an app at a time (← → or the names at the top).
+final class KeysPopup: Popup {
+    static let shared = KeysPopup(width: 600)
+
+    typealias Keys = [(String, String)]
+    static let apps: [(name: String, parts: [(String?, Keys)])] = [
+        ("ReDesk", [
+            (nil, [("⌃⌥,", "settings"), ("⌃⌥/", "these keys"), ("⌃⌘L", "lock screen"), ("⌘⇧T", "light / dark"),
+                   ("⌘⇧M", "video wallpaper stands still / moves")]),
+            ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window that way"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with that neighbour (tiling)"),
+                         ("⌃⌥⌘ ← → ↑ ↓", "resize the focused window (tiling)"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
+                         ("⌃⌥↩", "the focused window becomes the main one")]),
+            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement (tiling on)"), ("⌘↑ / ⌘↓", "fill the screen / the desk's middle"),
+                                ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
+            ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen (right at the screen)")]),
+        ]),
+        ("ReFile", [
+            (nil, [("↑ ↓", "select"), ("→ / Enter", "open"), ("←", "back to the folder above"), ("/", "search"), ("C / L", "views"),
+                   ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
+        ]),
+        ("ReSurf", [
+            (nil, [("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⌘[ / ⌘]", "back / forward"),
+                   ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page (Esc puts it back)"), ("⌘E", "e-ink"),
+                   ("⌘I", "info"), ("⌘J", "ReChat")]),
+            ("Search results", [("A / I / V", "all / images / videos"), ("F", "the same search in Marginalia"),
+                                ("← / →", "previous / next page"), ("↑ ↓  Enter", "choose, open")]),
+            ("ReChat", [("Enter", "send"), ("⇧Enter", "new line")]),
+        ]),
+        ("ReSound", [
+            (nil, [("Space", "play / pause"), ("⏮ ⏯ ⏭  (F7 F8 F9)", "previous / play-pause / next"), ("↑ ↓ ← →", "move"),
+                   ("Enter", "play"), ("1 – 4", "tabs (1 songs, 2 radio)"), ("/", "search"), ("S / R", "shuffle / repeat"),
+                   ("Q", "queue"), ("N", "new playlist"), ("I", "info")]),
+        ]),
+        ("ReNote", [
+            ("Notes", [("↑ ↓", "select a note"), ("← →", "previous / next space"), ("N", "new note"), ("E / Enter", "edit"),
+                       ("/  or  ⌘F", "search"), ("Backspace", "delete (Enter yes, Esc no)"), ("Esc", "home")]),
+            ("A note", [("⌘S", "save"), ("⌥← / ⌥→", "previous / next note"), ("Esc", "back")]),
+            ("Writing", [("⌘B", "highlight"), ("⌘Z", "undo"), ("⌘⇧Z  or  ⌃Y", "redo")]),
+            ("Home search", [("↑ ↓  Enter", "choose, open"), ("Esc", "clear")]),
+        ]),
+        ("ReBook", [
+            (nil, [("↑ ↓", "select"), ("Enter", "read"), ("← →  Space", "turn pages"), ("F", "full screen"), ("Esc", "back"),
+                   ("/", "search"), ("A", "add a book"), ("I", "info"), ("Backspace", "remove")]),
+        ]),
+    ]
+
+    private var app = UserDefaults.standard.integer(forKey: "keysApp") {
+        didSet { UserDefaults.standard.set(app, forKey: "keysApp") }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch Int(event.keyCode) {
+        case kVK_LeftArrow: app = (app + Self.apps.count - 1) % Self.apps.count; refresh()
+        case kVK_RightArrow: app = (app + 1) % Self.apps.count; refresh()
+        default: super.keyDown(with: event)
+        }
+    }
+
+    override func build() -> NSView {
+        app = min(max(app, 0), Self.apps.count - 1)
+        let tabs = NSSegmentedControl(labels: Self.apps.map(\.name), trackingMode: .selectOne, target: nil, action: nil)
+        tabs.selectedSegment = app
+        tabs.font = Self.body
+        let action = act { [weak self] sender in
+            self?.app = (sender as? NSSegmentedControl)?.selectedSegment ?? 0
+            DispatchQueue.main.async { self?.refresh() }
+        }
+        tabs.target = action
+        tabs.action = #selector(Do.fire(_:))
+        var views: [NSView] = [title("Keys"), label("← → another app  ·  Esc closes", alpha: 0.45, size: 12), tabs]
+        for (name, keys) in Self.apps[app].parts {
+            if let name { views.append(heading(name)) }
+            let grid = NSGridView(views: keys.map { key, what in
+                let k = label(key, alpha: 0.95)
+                k.font = .systemFont(ofSize: 13, weight: .medium)
+                return [k, label(what, alpha: 0.7)]
+            })
+            grid.columnSpacing = 22
+            grid.rowSpacing = 7
+            grid.column(at: 0).width = 150
+            views.append(grid)
+        }
+        let stack = column(views, spacing: 12)
+        stack.setCustomSpacing(18, after: tabs)
+        return stack
+    }
+}
+
 final class Desk: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         InkCursors.restore()
@@ -4193,6 +4396,40 @@ if CommandLine.arguments.contains("--lid-test") {
     Knocks.shared.testing = { Knocks.log(String(format: "felt %.3fg", $0)) }
     Knocks.shared.start()
     RunLoop.main.run(until: Date().addingTimeInterval(4.2))
+    exit(0)
+}
+
+// ReDesk --render-popups <folder>: the two popups drawn into PNGs there (to look at them); no desk
+if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < CommandLine.arguments.count {
+    let folder = URL(fileURLWithPath: CommandLine.arguments[at + 1])
+    _ = NSApplication.shared
+    _ = letterFont
+    func render(_ popup: Popup, _ name: String) {
+        popup.refresh()
+        guard let view = popup.contentView else { return }
+        view.layoutSubtreeIfNeeded()
+        let image = NSImage(size: view.bounds.size)
+        image.lockFocus()
+        NSColor(white: 0.13, alpha: 1).setFill()
+        view.bounds.fill()
+        image.unlockFocus()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let back = NSImage(size: view.bounds.size)
+        back.lockFocus()
+        NSColor(white: 0.13, alpha: 1).setFill()
+        NSRect(origin: .zero, size: view.bounds.size).fill()
+        rep.draw(in: NSRect(origin: .zero, size: view.bounds.size))
+        back.unlockFocus()
+        if let tiff = back.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? png.write(to: folder.appendingPathComponent(name))
+        }
+    }
+    render(SettingsPopup.shared, "settings.png")
+    for i in 0..<KeysPopup.apps.count {
+        UserDefaults.standard.set(i, forKey: "keysApp")
+        render(KeysPopup(width: 600), "keys-\(KeysPopup.apps[i].name).png")
+    }
     exit(0)
 }
 
