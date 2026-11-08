@@ -2934,7 +2934,7 @@ final class LidLight {
 final class LidTaps {
     static let shared = LidTaps()
     static let zones = 4
-    static let perZone = 6
+    static let perZone = 8
 
     struct Example: Codable { let zone: Int; let shape: [Double]; let peak: Double }
 
@@ -2946,10 +2946,10 @@ final class LidTaps {
     var taught: Bool { Set(examples.map(\.zone)).count == Self.zones }
 
     private(set) var examples: [Example] = {
-        guard let data = UserDefaults.standard.data(forKey: "lidTapExamples") else { return [] }
+        guard let data = UserDefaults.standard.data(forKey: "lidTapExamples2") else { return [] }
         return (try? JSONDecoder().decode([Example].self, from: data)) ?? []
     }() {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(examples), forKey: "lidTapExamples") }
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(examples), forKey: "lidTapExamples2") }
     }
 
     /// the motion sensor is there (the MacBooks from the M1 Pro and the M2 on)
@@ -3001,29 +3001,34 @@ final class LidTaps {
 
     // ── on the sensor's thread ──
 
+    /// One sensor's readings, split: the body's motion (about 1 to 40 times a second: the lid swinging back
+    /// from a tap, or the whole Mac moved) and the knock (faster: a finger on the screen rings it).
     private final class Stream {
-        var mean = SIMD3<Double>(repeating: .nan)
-        var ring = [SIMD3<Double>](repeating: .zero, count: 128)
+        private var slow = SIMD3<Double>(repeating: .nan)
+        private var fast = SIMD3<Double>(repeating: .nan)
+        var motion = [SIMD3<Double>](repeating: .zero, count: 512)
+        var knock = [SIMD3<Double>](repeating: .zero, count: 512)
         var index = 0
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
 
-        /// the reading less its slow part (gravity, the lid's angle): only what moves
-        func push(_ value: SIMD3<Double>) -> SIMD3<Double> {
-            if mean.x.isNaN { mean = value }
-            mean += (value - mean) * 0.01
-            let moving = value - mean
-            ring[index % ring.count] = moving
+        func push(_ value: SIMD3<Double>) -> (motion: Double, knock: Double) {
+            if slow.x.isNaN { slow = value; fast = value }
+            slow += (value - slow) * 0.01
+            fast += (value - fast) * 0.25
+            let m = fast - slow, k = value - fast
+            motion[index % 512] = m
+            knock[index % 512] = k
             index += 1
-            return moving
+            return ((m * m).sum().squareRoot(), (k * k).sum().squareRoot())
         }
 
-        /// the last n, oldest first
-        func last(_ n: Int) -> [SIMD3<Double>] {
-            (0..<n).map { ring[(index - n + $0 + ring.count * 4) % ring.count] }
+        /// readings `from` back to `to` back (oldest first)
+        func span(_ ring: [SIMD3<Double>], from: Int, to: Int) -> [SIMD3<Double>] {
+            (to..<from).reversed().map { ring[(index - 1 - $0 + 512 * 8) % 512] }
         }
     }
 
-    /// The usual shaking: the strongest of each 50 ms, over the last two seconds, the quieter third's top.
+    /// The usual: the strongest of each 50 ms, over the last two seconds, the quieter third's top.
     /// A tap and its ringing take a few of those 50 ms; they don't move it.
     private final class Usual {
         private var blocks = [Double](repeating: 0, count: 40)
@@ -3045,21 +3050,19 @@ final class LidTaps {
         }
     }
 
-    private let accelUsual = Usual()
-    private let gyroUsual = Usual()
+    private let knockUsual = Usual()
     private let accel = Stream()
     private let gyro = Stream()
-    private var noise = 0.002
     private var count = 0
     private var gyroCount = 0
-    private var gyroNow = 0.0
-    private var gyroNoise = 0.05
-    /// the strongest shaking of each second, for the log while teaching
-    private var secondAccel = 0.0
-    private var secondGyro = 0.0
+    /// the gyroscope's motion, the strongest of the last 0.45 s (the Mac moved, not tapped)
+    private var gyroMotion = [Double](repeating: 0, count: 360)
+    private var secondKnock = 0.0
+    private var secondMotion = 0.0
     var logSeconds = false
     private var due: Int?
-    private var peak = 0.0
+    private var knockPeak = 0.0
+    private var motionPeak = 0.0
     private var quietUntil = 0
 
     private func listen() {
@@ -3113,68 +3116,70 @@ final class LidTaps {
 
     private func gyroReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
         guard let value = Self.xyz(report, length) else { return }
-        let moving = gyro.push(value)
+        let (motion, _) = gyro.push(value)
+        gyroMotion[gyroCount % gyroMotion.count] = motion
         gyroCount += 1
-        gyroNow = (moving * moving).sum().squareRoot()
-        secondGyro = max(secondGyro, gyroNow)
-        gyroUsual.add(gyroNow)
-        gyroNoise = gyroUsual.level
+        secondMotion = max(secondMotion, motion)
     }
 
-    /// A tap: the shaking jumps well above its usual; its shape is taken 60 ms later (20 ms before, 60 after).
+    /// A tap: a knock well above the usual (6 times, and 0.007 g at least). 150 ms later it is looked at:
+    /// if the Mac swung meanwhile (the gyroscope over 15°/s) or the knock was small beside the motion,
+    /// the Mac was moved, not tapped.
     private func accelReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
         guard let value = Self.xyz(report, length) else { return }
-        let moving = accel.push(value)
+        let (motion, knock) = accel.push(value)
         count += 1
-        let size = (moving * moving).sum().squareRoot()
-        secondAccel = max(secondAccel, size)
+        knockUsual.add(knock)
+        secondKnock = max(secondKnock, knock)
         if count % 800 == 0 {
             if logSeconds {
-                let line = String(format: "second: accel max %.4fg (usual %.4f), gyro max %.2f (usual %.2f), reports %d/%d",
-                                  secondAccel, noise, secondGyro, gyroNoise, count, gyroCount)
+                let line = String(format: "second: knock max %.4fg (usual %.4f), turn max %.1f°/s", secondKnock, knockUsual.level, secondMotion)
                 DispatchQueue.main.async { LidTaps.log(line) }
             }
-            secondAccel = 0
-            secondGyro = 0
+            secondKnock = 0
+            secondMotion = 0
         }
-        accelUsual.add(size)
-        noise = accelUsual.level
-        // how far above their usual the accelerometer and the gyroscope shake now (never above less
-        // than a still Mac's shaking: 0.004 g, 0.4°/s)
-        let strength = max(size / max(noise, 0.004), gyroNow / max(gyroNoise, 0.4))
         if let at = due {
-            peak = max(peak, strength)
-            if count >= at {
-                due = nil
-                quietUntil = count + 320
-                let shape = Self.shape(accel.last(64), gyro.last(64))
-                let peak = self.peak
-                DispatchQueue.main.async { self.felt(shape, peak: peak) }
+            if count <= at - 72 {
+                knockPeak = max(knockPeak, knock)
+                motionPeak = max(motionPeak, motion)
             }
+            guard count >= at else { return }
+            due = nil
+            quietUntil = count + 240
+            let turned = gyroMotion.max() ?? 0
+            let knock = knockPeak, ratio = knockPeak / max(motionPeak, 0.0001)
+            guard turned < 15, ratio > 0.4 else {
+                let line = String(format: "moved, not tapped: knock %.3fg, turn %.0f°/s, knock/motion %.2f", knock, turned, ratio)
+                DispatchQueue.main.async { LidTaps.log(line) }
+                return
+            }
+            let shape = Self.shape(accel, gyro)
+            DispatchQueue.main.async { self.felt(shape, peak: knock) }
             return
         }
-        guard count > 1600 else { return }
-        if strength > 4, count > quietUntil {
-            due = count + 48
-            peak = strength
-        }
+        guard count > 1600, count > quietUntil, knock > max(knockUsual.level * 6, 0.007) else { return }
+        due = count + 120
+        knockPeak = knock
+        motionPeak = motion
     }
 
-    /// How the lid moved: each axis in eight steps of 10 ms (the twist), and how much each one shook,
-    /// each part of unit length (a soft tap and a firm one, the same shape).
-    private static func shape(_ accel: [SIMD3<Double>], _ gyro: [SIMD3<Double>]) -> [Double] {
+    /// How the Mac moved from 20 ms before the tap to 130 ms after: the motion of each axis in six steps,
+    /// and how hard each axis rang; each part of unit length (a soft tap and a firm one, the same shape).
+    private static func shape(_ accel: Stream, _ gyro: Stream) -> [Double] {
         func steps(_ s: [SIMD3<Double>]) -> [Double] {
             var out: [Double] = []
+            let n = s.count / 6
             for axis in 0..<3 {
-                for step in 0..<8 {
+                for step in 0..<6 {
                     var sum = 0.0
-                    for i in (step * 8)..<(step * 8 + 8) { sum += s[i][axis] }
-                    out.append(sum / 8)
+                    for i in (step * n)..<(step * n + n) { sum += s[i][axis] }
+                    out.append(sum / Double(n))
                 }
             }
             return out
         }
-        func shaking(_ s: [SIMD3<Double>]) -> [Double] {
+        func ringing(_ s: [SIMD3<Double>]) -> [Double] {
             var out: [Double] = []
             for axis in 0..<3 {
                 var sum = 0.0
@@ -3183,11 +3188,14 @@ final class LidTaps {
             }
             return out
         }
-        func unit(_ v: [Double], _ weight: Double) -> [Double] {
+        func unit(_ v: [Double]) -> [Double] {
             let length = v.reduce(0) { $0 + $1 * $1 }.squareRoot()
-            return length > 0 ? v.map { $0 / length * weight } : v
+            return length > 0 ? v.map { $0 / length } : v
         }
-        return unit(steps(accel), 1) + unit(steps(gyro), 1) + unit(shaking(accel) + shaking(gyro), 0.7)
+        // the tap was 120 readings ago; 16 before it to 104 after
+        let a = accel.span(accel.motion, from: 136, to: 16), g = gyro.span(gyro.motion, from: 136, to: 16)
+        let ak = accel.span(accel.knock, from: 136, to: 16), gk = gyro.span(gyro.knock, from: 136, to: 16)
+        return unit(steps(a)) + unit(steps(g)) + unit(ringing(ak)) + unit(ringing(gk))
     }
 
     // ── on the main thread ──
@@ -3200,29 +3208,35 @@ final class LidTaps {
         // softer than the softest taught tap by far: a knock on the desk, the Mac set down
         let soft = examples.map(\.peak).min() ?? 0
         let zone = peak > soft * 0.4 ? Self.zone(of: shape, among: examples) : nil
-        Self.log(String(format: "tap %.0f× usual → %@", peak, zone.map { corners[$0].word } ?? "none"))
+        Self.log(String(format: "tap %.3fg → %@", peak, zone.map { corners[$0].word } ?? "none"))
         guard let zone else { return }
         lastTap = Date()
         ReDesk.open(corners[zone])
     }
 
-    private static func similarity(_ a: [Double], _ b: [Double]) -> Double {
-        let dot = zip(a, b).reduce(0) { $0 + $1.0 * $1.1 }
-        let la = a.reduce(0) { $0 + $1 * $1 }.squareRoot(), lb = b.reduce(0) { $0 + $1 * $1 }.squareRoot()
-        return la > 0 && lb > 0 ? dot / (la * lb) : 0
-    }
-
-    /// The zone whose taught taps are most like this one (the best three of each), if it is clearly that one.
+    /// The zone whose taught taps are nearest this one (the nearest three of each), if clearly nearer than
+    /// any other's. Near as each feature varies among the taught taps (what all taps share counts for nothing).
     static func zone(of shape: [Double], among examples: [Example]) -> Int? {
-        var scores: [(zone: Int, score: Double)] = []
-        for zone in 0..<zones {
-            let alike = examples.filter { $0.zone == zone }.map { similarity(shape, $0.shape) }.sorted(by: >).prefix(3)
-            guard !alike.isEmpty else { continue }
-            scores.append((zone, alike.reduce(0, +) / Double(alike.count)))
+        guard let first = examples.first, first.shape.count == shape.count else { return nil }
+        let n = Double(examples.count)
+        var mean = [Double](repeating: 0, count: shape.count), spread = mean
+        for e in examples { for i in e.shape.indices { mean[i] += e.shape[i] / n } }
+        for e in examples { for i in e.shape.indices { spread[i] += pow(e.shape[i] - mean[i], 2) / n } }
+        spread = spread.map { max($0.squareRoot(), 1e-6) }
+        func distance(_ a: [Double], _ b: [Double]) -> Double {
+            var sum = 0.0
+            for i in a.indices { sum += pow((a[i] - b[i]) / spread[i], 2) }
+            return sum.squareRoot()
         }
-        scores.sort { $0.score > $1.score }
-        guard let best = scores.first, best.score > 0.55 else { return nil }
-        if scores.count > 1, best.score - scores[1].score < 0.06 { return nil }
+        var scores: [(zone: Int, distance: Double)] = []
+        for zone in 0..<zones {
+            let near = examples.filter { $0.zone == zone }.map { distance(shape, $0.shape) }.sorted().prefix(3)
+            guard !near.isEmpty else { continue }
+            scores.append((zone, near.reduce(0, +) / Double(near.count)))
+        }
+        scores.sort { $0.distance < $1.distance }
+        guard let best = scores.first else { return nil }
+        if scores.count > 1, best.distance > scores[1].distance * 0.9 { return nil }
         return best.zone
     }
 
@@ -3496,7 +3510,7 @@ final class Desk: NSObject, NSApplicationDelegate {
 // ReDesk --lid-test: four seconds of the lid sensor, written to LidTaps.log and printed; no desk
 if CommandLine.arguments.contains("--lid-test") {
     LidTaps.shared.logSeconds = true
-    LidTaps.shared.teaching = { LidTaps.log(String(format: "felt %.0f× usual", $0.peak)) }
+    LidTaps.shared.teaching = { LidTaps.log(String(format: "felt %.3fg", $0.peak)) }
     LidTaps.shared.start()
     RunLoop.main.run(until: Date().addingTimeInterval(4.2))
     exit(0)
