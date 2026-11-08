@@ -3902,9 +3902,6 @@ final class Snap {
 
 // ── the two popups: Settings (⌃⌥, or a right click) and Keys (⌃⌥/), every Re app's keys ──
 
-@_silgen_name("CGSSetWindowBackgroundBlurRadius")
-private func CGSSetWindowBackgroundBlurRadius(_ cid: CGSConnectionID, _ wid: Int32, _ radius: Int32) -> CGError
-
 /// The Re apps' popups (as ReNote's INFO): the paper, its grain and a 2pt line round it, in the middle of the
 /// screen, everything else blurred behind; the heading in Noto Sans JP spaced wide, the words in Kurale.
 /// Light or dark as the Mac is. Esc, the same keys again, or a click beside it closes it.
@@ -3934,6 +3931,12 @@ class Popup: NSPanel {
         veil.backgroundColor = NSColor(white: 0, alpha: 0.001)
         veil.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         veil.onClick = { [weak self] in self?.close() }
+        // the blur: the system's own glass over everything behind (light or dark as the Mac is)
+        let glass = NSVisualEffectView()
+        glass.material = .fullScreenUI
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        veil.contentView = glass
         return veil
     }()
     /// the controls' actions, kept while they're shown
@@ -3968,8 +3971,8 @@ class Popup: NSPanel {
         refresh()
         if let screen = NSScreen.main {
             veil.setFrame(screen.frame, display: true)
+            veil.appearance = NSAppearance(named: Appearance.dark ? .darkAqua : .aqua)
             veil.orderFront(nil)
-            _ = CGSSetWindowBackgroundBlurRadius(CGSMainConnectionID(), Int32(veil.windowNumber), 12)
         }
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
