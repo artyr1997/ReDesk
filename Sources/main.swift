@@ -4412,6 +4412,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [wave] _ in wave.set(playing: othersPlaying()) }
         if Tiler.shared.on { Tiler.shared.start() }
         NotificationCenter.default.addObserver(forName: .arrangementChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.showPieces()
             self?.showBar()
         }
         InkCursors.apply()
@@ -4461,9 +4462,26 @@ final class Desk: NSObject, NSApplicationDelegate {
     @objc private func layout() {
         guard let screen = NSScreen.screens.first else { return }
         windows.forEach { $0.place(on: screen) }
+        showPieces(animated: false)
         LiveWallpaper.shared.layout()
         Tiler.shared.retile()
         showBar()
+    }
+
+    /// The desk's own pieces (the corner words, the dots, the day line, the battery, the wave): gone in
+    /// Almost Full, where only the apps across the top stay; they fade out and back.
+    private func showPieces(animated: Bool = true) {
+        let hidden = Tiler.shared.on && Tiler.shared.almostFull
+        for window in windows {
+            let alpha: CGFloat = hidden ? 0 : 1
+            window.ignoresMouseEvents = hidden || window.contentView === wave
+            guard window.alphaValue != alpha else { continue }
+            if animated {
+                NSAnimationContext.runAnimationGroup { $0.duration = 0.25; window.animator().alphaValue = alpha }
+            } else {
+                window.alphaValue = alpha
+            }
+        }
     }
 
     /// The apps across the top: only while the windows are in Full Screen or Almost Full. In the menu bar while it stays,
