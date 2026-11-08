@@ -3027,6 +3027,13 @@ final class LidTaps {
     private let gyro = Stream()
     private var noise = 0.002
     private var count = 0
+    private var gyroCount = 0
+    private var gyroNow = 0.0
+    private var gyroNoise = 0.05
+    /// the strongest shaking of each second, for the log while teaching
+    private var secondAccel = 0.0
+    private var secondGyro = 0.0
+    var logSeconds = false
     private var due: Int?
     private var peak = 0.0
     private var quietUntil = 0
@@ -3081,7 +3088,12 @@ final class LidTaps {
     }
 
     private func gyroReport(_ report: UnsafeMutablePointer<UInt8>, _ length: CFIndex) {
-        if let value = Self.xyz(report, length) { _ = gyro.push(value) }
+        guard let value = Self.xyz(report, length) else { return }
+        let moving = gyro.push(value)
+        gyroCount += 1
+        gyroNow = (moving * moving).sum().squareRoot()
+        secondGyro = max(secondGyro, gyroNow)
+        if due == nil { gyroNoise += (gyroNow - gyroNoise) * (gyroCount > 800 ? 0.002 : 0.01) }
     }
 
     /// A tap: the shaking jumps well above its usual; its shape is taken 60 ms later (20 ms before, 60 after).
@@ -3090,8 +3102,20 @@ final class LidTaps {
         let moving = accel.push(value)
         count += 1
         let size = (moving * moving).sum().squareRoot()
+        secondAccel = max(secondAccel, size)
+        if count % 800 == 0 {
+            if logSeconds {
+                let line = String(format: "second: accel max %.4fg (usual %.4f), gyro max %.3f (usual %.3f), reports %d/%d",
+                                  secondAccel, noise, secondGyro, gyroNoise, count, gyroCount)
+                DispatchQueue.main.async { LidTaps.log(line) }
+            }
+            secondAccel = 0
+            secondGyro = 0
+        }
+        // how far above their usual the accelerometer and the gyroscope shake now
+        let strength = max(size / max(noise, 0.0005), gyroNow / max(gyroNoise, 0.005))
         if let at = due {
-            peak = max(peak, size)
+            peak = max(peak, strength)
             if count >= at {
                 due = nil
                 quietUntil = count + 320
@@ -3102,9 +3126,9 @@ final class LidTaps {
             return
         }
         guard count > 800 else { return noise += (size - noise) * 0.01 }
-        if size > max(noise * 15, 0.035), count > quietUntil {
+        if strength > 7, count > quietUntil {
             due = count + 48
-            peak = size
+            peak = strength
         } else {
             noise += (size - noise) * 0.002
         }
@@ -3150,7 +3174,7 @@ final class LidTaps {
         // softer than the softest taught tap by far: a knock on the desk, the Mac set down
         let soft = examples.map(\.peak).min() ?? 0
         let zone = peak > soft * 0.4 ? Self.zone(of: shape, among: examples) : nil
-        Self.log(String(format: "tap %.3fg → %@", peak, zone.map { corners[$0].word } ?? "none"))
+        Self.log(String(format: "tap %.0f× usual → %@", peak, zone.map { corners[$0].word } ?? "none"))
         guard let zone else { return }
         lastTap = Date()
         ReDesk.open(corners[zone])
@@ -3244,6 +3268,8 @@ final class LidTapTeacher: NSView {
             return event
         }
         LidTaps.shared.teaching = { [weak self] example in self?.felt(example) }
+        LidTaps.shared.logSeconds = true
+        LidTaps.log("teaching begins")
         LidTaps.shared.start()
         needsDisplay = true
     }
@@ -3266,6 +3292,8 @@ final class LidTapTeacher: NSView {
         if let keys { NSEvent.removeMonitor(keys) }
         keys = nil
         LidTaps.shared.teaching = nil
+        LidTaps.shared.logSeconds = false
+        LidTaps.log("teaching ends, \(taught.count) taps")
         if keep { LidTaps.shared.learned(taught) } else { LidTaps.shared.stop() }
         overlay?.orderOut(nil)
         overlay = nil
@@ -3437,6 +3465,15 @@ final class Desk: NSObject, NSApplicationDelegate {
         stripWindow.setFrame(frame, display: true)
         stripWindow.orderFront(nil)
     }
+}
+
+// ReDesk --lid-test: four seconds of the lid sensor, written to LidTaps.log and printed; no desk
+if CommandLine.arguments.contains("--lid-test") {
+    LidTaps.shared.logSeconds = true
+    LidTaps.shared.teaching = { LidTaps.log(String(format: "felt %.0f× usual", $0.peak)) }
+    LidTaps.shared.start()
+    RunLoop.main.run(until: Date().addingTimeInterval(4.2))
+    exit(0)
 }
 
 let app = NSApplication.shared
