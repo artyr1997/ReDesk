@@ -2862,7 +2862,7 @@ enum KnockAction: String, CaseIterable {
         case .playPause: return "Play / Pause"
         case .mute: return "Mute"
         case .screenshot: return "Screenshot"
-        case .hideWindows: return "Hide All Windows"
+        case .hideWindows: return "Hide / Show Windows"
         case .closeWindows: return "Close All Windows"
         case .nextWallpaper: return "Next Wallpaper"
         case .freezeWallpaper: return "Pause Wallpaper"
@@ -2880,7 +2880,9 @@ enum KnockAction: String, CaseIterable {
         case .playPause: Self.mediaKey(16)  // NX_KEYTYPE_PLAY
         case .mute: Self.mediaKey(7)        // NX_KEYTYPE_MUTE
         case .screenshot: Self.keys(kVK_ANSI_3, [.maskCommand, .maskShift])
-        case .hideWindows: Self.reApps().forEach { $0.hide() }
+        case .hideWindows:  // any shown: all hidden; all hidden: all shown again
+            let apps = Self.reApps()
+            if apps.contains(where: { !$0.isHidden }) { apps.forEach { $0.hide() } } else { apps.forEach { $0.unhide() } }
         case .closeWindows: Self.others().forEach(Self.closeWindows)
         case .nextWallpaper: Wallpapers.step(1)
         case .freezeWallpaper: LiveWallpaper.shared.frozen.toggle()
