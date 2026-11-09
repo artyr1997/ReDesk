@@ -2880,7 +2880,7 @@ enum KnockAction: String, CaseIterable {
         case .playPause: Self.mediaKey(16)  // NX_KEYTYPE_PLAY
         case .mute: Self.mediaKey(7)        // NX_KEYTYPE_MUTE
         case .screenshot: Self.keys(kVK_ANSI_3, [.maskCommand, .maskShift])
-        case .hideWindows: Self.others().forEach { $0.hide() }
+        case .hideWindows: Self.reApps().forEach { $0.hide() }
         case .closeWindows: Self.others().forEach(Self.closeWindows)
         case .nextWallpaper: Wallpapers.step(1)
         case .freezeWallpaper: LiveWallpaper.shared.frozen.toggle()
@@ -2889,6 +2889,11 @@ enum KnockAction: String, CaseIterable {
         case .hear: ReDesk.open(corners[2])
         case .note: ReDesk.open(corners[3])
         }
+    }
+
+    /// the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) that are running
+    private static func reApps() -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { tiledApps.contains($0.bundleIdentifier ?? "") }
     }
 
     /// the apps with windows, but ReDesk
