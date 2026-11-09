@@ -2881,8 +2881,14 @@ enum KnockAction: String, CaseIterable {
         case .mute: Self.mediaKey(7)        // NX_KEYTYPE_MUTE
         case .screenshot: Self.keys(kVK_ANSI_3, [.maskCommand, .maskShift])
         case .hideWindows:  // any shown: all hidden; all hidden: all shown again
-            let apps = Self.reApps()
-            if apps.contains(where: { !$0.isHidden }) { apps.forEach { $0.hide() } } else { apps.forEach { $0.unhide() } }
+            // each app fades its own windows out and hides, or shows them again fading in
+            let apps = Self.reApps(), hide = apps.contains { !$0.isHidden }
+            DistributedNotificationCenter.default().postNotificationName(
+                .init("com.artursavytskyi.re.windows"), object: hide ? "hide" : "show", userInfo: nil, deliverImmediately: true)
+            // an app that didn't hear it (an older build): at once, without the fade
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                for app in apps where app.isHidden != hide { _ = hide ? app.hide() : app.unhide() }
+            }
         case .closeWindows: Self.others().forEach(Self.closeWindows)
         case .nextWallpaper: Wallpapers.step(1)
         case .freezeWallpaper: LiveWallpaper.shared.frozen.toggle()
