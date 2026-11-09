@@ -3207,8 +3207,6 @@ final class Knocks {
         knocks += 1
         lastAt = now
         Self.log(String(format: "knock %d, %.3fg", knocks, peak))
-        // one alone is no gesture: the diamonds from the second on
-        if knocks >= 2 { KnockFlash.shared.show(knocks) }
         done?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.finish() }
         done = work
@@ -3221,12 +3219,10 @@ final class Knocks {
         knocks = 0
         // typed, clicked or scrolled from just before the first knock on: the keys shook it, not a knock
         guard lastInput < firstAt.addingTimeInterval(-0.35) else {
-            KnockFlash.shared.hide()
             return Self.log("\(count) knocks, but typing or clicking around them: nothing")
         }
         let action = Self.counts.contains(count) ? self.action(count) : .none
         Self.log("\(count) knocks → \(action.title)")
-        if count >= 2 { KnockFlash.shared.done(action == .none ? nil : action.title) }
         action.run()
     }
 
@@ -3245,80 +3241,6 @@ final class Knocks {
         }
     }
 }
-
-/// Each knock seen: a diamond for each, in the middle of the screen; when the gesture is done, what it does
-/// under them, and all of it fades.
-final class KnockFlash: NSView {
-    static let shared = KnockFlash()
-
-    private var count = 0
-    private var words: String?
-    private var fade: DispatchWorkItem?
-    private lazy var panel: NSPanel = {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 90), styleMask: [.borderless, .nonactivatingPanel],
-                            backing: .buffered, defer: false)
-        panel.level = .statusBar
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.ignoresMouseEvents = true
-        panel.hasShadow = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.contentView = self
-        return panel
-    }()
-
-    func show(_ count: Int) {
-        self.count = count
-        words = nil
-        fade?.cancel()
-        if let screen = NSScreen.main {
-            panel.setFrameOrigin(NSPoint(x: screen.frame.midX - 180, y: screen.frame.midY - 45))
-        }
-        panel.alphaValue = 1
-        panel.orderFrontRegardless()
-        needsDisplay = true
-    }
-
-    func done(_ words: String?) {
-        self.words = words
-        needsDisplay = true
-        later(words == nil ? 0.2 : 0.9)
-    }
-
-    func hide() { later(0) }
-
-    private func later(_ seconds: Double) {
-        fade?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            NSAnimationContext.runAnimationGroup({ $0.duration = 0.35; self.panel.animator().alphaValue = 0 }) {
-                if self.panel.alphaValue == 0 { self.panel.orderOut(nil) }
-            }
-        }
-        fade = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let shown = min(count, 5)
-        let gap: CGFloat = 26
-        let y = bounds.height - 28
-        for i in 0..<shown {
-            let x = bounds.midX + (CGFloat(i) - CGFloat(shown - 1) / 2) * gap
-            drawDiamond(at: NSPoint(x: x, y: y), color: ink(0.85))
-        }
-        guard let words else { return }
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
-        shadow.shadowBlurRadius = 6
-        let text = NSAttributedString(string: words.uppercased(), attributes: [
-            .font: lockLetters, .foregroundColor: ink(0.85), .kern: 2, .shadow: shadow,
-        ])
-        let size = text.size()
-        text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: y - 34))
-    }
-}
-
 // ── a snap of the fingers locks the screen ──
 
 /// The microphone, listened to for a snap of the fingers or a clap right at the screen: a click so loud only
