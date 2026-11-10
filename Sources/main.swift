@@ -306,7 +306,8 @@ final class LiveWallpaper {
                 self.remux?.stop()
                 self.remux = nil
                 let asset = AVURLAsset(url: stream.url, options: ["AVURLAssetHTTPHeaderFieldsKey": stream.headers])
-                self.show(AVPlayerItem(asset: asset), in: player, looping: !stream.live)
+                self.show(AVPlayerItem(asset: asset), in: player, looping: !stream.live,
+                          from: stream.live ? 0 : YouTubeWallpaper.start(stream.duration))
             }
             // YouTube's links last some six hours: a fresh one well before
             self.watchStream(link, player, after: 4 * 3600)
@@ -320,7 +321,7 @@ final class LiveWallpaper {
     /// its files served on this Mac; once a few seconds of it are there, played as a live stream.
     private func remuxed(_ stream: YouTubeWallpaper.Stream, _ link: URL, _ player: AVQueuePlayer) {
         let old = remux
-        let at = old?.position ?? 0
+        let at = old?.position ?? YouTubeWallpaper.start(stream.duration)
         old?.pause()
         let remux = Remux(stream, at: at)
         remux.failed = { [weak self, weak remux] in
@@ -356,7 +357,8 @@ final class LiveWallpaper {
         remuxed(remux.stream, link, player)
     }
 
-    private func show(_ item: AVPlayerItem, in player: AVQueuePlayer, looping: Bool) {
+    /// `from`: where the video starts, and where it starts again at its end (a minute in, YouTubeWallpaper.start)
+    private func show(_ item: AVPlayerItem, in player: AVQueuePlayer, looping: Bool, from start: Double = 0) {
         looper = nil
         if let ended { NotificationCenter.default.removeObserver(ended) }
         ended = nil
@@ -367,10 +369,20 @@ final class LiveWallpaper {
             player.actionAtItemEnd = .none
             ended = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
                                                            object: item, queue: .main) { [weak player] _ in
-                player?.seek(to: .zero)
+                player?.seek(to: CMTime(seconds: start, preferredTimescale: 600))
             }
         }
-        if !frozen && !resting { player.play() }
+        if start > 0 {
+            // a minute in before it moves (AVFoundation seeks once the stream is ready)
+            player.seek(to: CMTime(seconds: start, preferredTimescale: 600)) { [weak self, weak player] _ in
+                DispatchQueue.main.async {
+                    guard let self, let player, self.player === player, !self.frozen, !self.resting else { return }
+                    player.play()
+                }
+            }
+        } else if !frozen && !resting {
+            player.play()
+        }
         // how it went, a little later
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak player] in
             guard let player, let item = player.currentItem else { return YouTubeWallpaper.note("  no item after 20 s") }
@@ -2325,8 +2337,8 @@ final class Remux {
         from = position
         task = nil
         if ended.terminationReason == .exit && ended.terminationStatus == 0 {
-            // the end: round again, from the start
-            from = 0
+            // the end: round again, from the start (a minute in)
+            from = YouTubeWallpaper.start(stream.duration)
             run()
         } else {
             YouTubeWallpaper.note("  ffmpeg stopped (\(ended.terminationStatus))")
@@ -2480,6 +2492,10 @@ enum YouTubeWallpaper {
     }
 
     static var ffmpeg: String? { tool("ffmpeg") }
+
+    /// Where a YouTube wallpaper starts, and starts again at its end: a minute in (past the titles and the
+    /// talk most videos open with), when the video is long enough for it (a minute and a half or more).
+    static func start(_ duration: Double) -> Double { duration >= 90 ? 60 : 0 }
 
     /// On the main thread; nil when YouTube didn't say.
     static func resolve(_ file: URL, then done: @escaping (Stream?) -> Void) {
