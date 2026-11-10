@@ -861,6 +861,8 @@ enum CommandKeys {
         guard flags == .maskCommand else { return nil }
         // ⌘0: Almost Full on / off
         if key == kVK_ANSI_0 { return { Tiler.shared.almostFull.toggle() } }
+        // ⌘9: Flush on / off
+        if key == kVK_ANSI_9 { return { Tiler.shared.flush.toggle() } }
         // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
         if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
             return { Tiler.shared.choose(Arrangement.allCases[number]) }
@@ -877,7 +879,50 @@ enum CommandKeys {
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
 let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook"])
-let tileGap: CGFloat = 10
+/// between the windows: none while Flush (they make one window), else 10
+var tileGap: CGFloat { Tiler.shared.flush ? 0 : edgeGap }
+/// from the screen's edges in Almost Full
+let edgeGap: CGFloat = 10
+
+/// Flush: which of each window's corners are rounded (only the outer ones of the whole) and which of its
+/// edges touch another window, told to its app (a distributed notification, as Hide / Show Windows), which
+/// rounds only those corners and draws no rim along those edges. Bits: corners 1 top left, 2 top right,
+/// 4 bottom left, 8 bottom right; edges 1 top, 2 right, 4 bottom, 8 left.
+enum WindowJoins {
+    static let name = Notification.Name("com.artursavytskyi.re.corners")
+
+    static func tell(_ windows: [(element: AXUIElement, frame: NSRect)], separate: Bool) {
+        guard let top = NSScreen.screens.first?.frame.maxY else { return }
+        for (i, (element, r)) in windows.enumerated() {
+            var pid: pid_t = 0
+            guard AXUIElementGetPid(element, &pid) == .success else { continue }
+            let others = windows.enumerated().filter { $0.offset != i }.map(\.element.frame)
+            var corners = 15, edges = 0
+            if !separate {
+                let near: CGFloat = 2
+                func touched(_ p: CGPoint) -> Bool {
+                    others.contains { p.x >= $0.minX - near && p.x <= $0.maxX + near && p.y >= $0.minY - near && p.y <= $0.maxY + near }
+                }
+                corners = 0
+                if !touched(CGPoint(x: r.minX, y: r.maxY)) { corners |= 1 }
+                if !touched(CGPoint(x: r.maxX, y: r.maxY)) { corners |= 2 }
+                if !touched(CGPoint(x: r.minX, y: r.minY)) { corners |= 4 }
+                if !touched(CGPoint(x: r.maxX, y: r.minY)) { corners |= 8 }
+                func overlap(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> Bool { min(a1, b1) - max(a0, b0) > near }
+                for o in others {
+                    if abs(o.minY - r.maxY) <= near && overlap(r.minX, r.maxX, o.minX, o.maxX) { edges |= 1 }
+                    if abs(o.minX - r.maxX) <= near && overlap(r.minY, r.maxY, o.minY, o.maxY) { edges |= 2 }
+                    if abs(o.maxY - r.minY) <= near && overlap(r.minX, r.maxX, o.minX, o.maxX) { edges |= 4 }
+                    if abs(o.maxX - r.minX) <= near && overlap(r.minY, r.maxY, o.minY, o.maxY) { edges |= 8 }
+                }
+            }
+            // the window's place as the apps see it: from the top left of the main screen, in points
+            let info: [String: Any] = ["pid": Int(pid), "corners": corners, "edges": edges,
+                                       "x": Double(r.minX), "y": Double(top - r.maxY), "w": Double(r.width), "h": Double(r.height)]
+            DistributedNotificationCenter.default().postNotificationName(name, object: nil, userInfo: info, deliverImmediately: true)
+        }
+    }
+}
 
 /// An Accessibility window, comparable so the order can be kept between looks.
 struct TiledWindow: Hashable {
@@ -1088,6 +1133,15 @@ final class Tiler {
         }
     }
 
+    /// Flush (⌘9): no room between the windows, and only the outer corners of them all rounded, as one window
+    var flush = UserDefaults.standard.bool(forKey: "flushTiles") {
+        didSet {
+            UserDefaults.standard.set(flush, forKey: "flushTiles")
+            retile()
+            NotificationCenter.default.post(name: .arrangementChanged, object: nil)
+        }
+    }
+
     /// whether the apps go across the top: Full Screen, or Almost Full
     var showsApps: Bool { on && (arrangement == .full || almostFull) }
 
@@ -1144,6 +1198,8 @@ final class Tiler {
         timer?.invalidate()
         timer = nil
         overlay.hide()
+        // no longer tiled: every window round again
+        WindowJoins.tell(order.compactMap { w in frame(of: w.element).map { (w.element, $0) } }, separate: true)
     }
 
     private func tick() {
@@ -1274,8 +1330,8 @@ final class Tiler {
         let layout = Layout(area: screen.visibleFrame)
         if arrangement == .full { return layout.area }
         // Almost Full: right under the top (the menu bar, or the apps' strip where it hides), `tileGap` from the other edges
-        let almost = NSRect(x: layout.area.minX + tileGap, y: layout.area.minY + tileGap,
-                            width: layout.area.width - tileGap * 2, height: layout.area.height - tileGap)
+        let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
+                            width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
         return almostFull ? almost : layout.tiles
     }
 
@@ -1370,6 +1426,8 @@ final class Tiler {
         guard on, AXIsProcessTrusted() else { return }
         remember()
         slots = places()
+        // each app told which of its corners to round (all, but while Flush); stacked, each window is alone
+        WindowJoins.tell(zip(order, slots).map { ($0.element, $1) }, separate: !flush || arrangement.stacks)
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
@@ -3873,6 +3931,7 @@ final class SettingsPopup: Popup {
         desk.append(choiceRow("Arrangement", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0,
                               indent: 18, note: "⌘1…⌘8") { Tiler.shared.choose(arrangements[$0]) })
         desk.append(toggleRow("Almost full", Tiler.shared.almostFull, indent: 18, note: "⌘0") { Tiler.shared.almostFull = $0 })
+        desk.append(toggleRow("Flush", Tiler.shared.flush, indent: 18, note: "⌘9") { Tiler.shared.flush = $0 })
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
@@ -3950,7 +4009,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one")]),
-            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
+            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
