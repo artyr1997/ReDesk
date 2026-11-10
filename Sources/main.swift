@@ -540,17 +540,75 @@ enum Crossfade {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
     }
 
+    /// While the new wallpaper loads, the old one blurs, draws a little nearer and darkens, then breathes
+    /// (the shade slowly deeper and lighter) until the new one is there; it then fades away over it,
+    /// so the new one comes into focus.
+    static func soften(_ windows: [NSWindow]) {
+        for window in windows {
+            guard let view = window.contentView, let layer = view.layer else { continue }
+            view.layerUsesCoreImageFilters = true
+            let size = view.bounds.size
+            let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: 0])
+            blur?.name = "blur"
+            layer.filters = blur.map { [$0] }
+            let soft = CABasicAnimation(keyPath: "filters.blur.inputRadius")
+            soft.fromValue = 0
+            soft.toValue = 28
+            // nearer about the middle (the layer turns about its corner): the blur's soft edges off the screen
+            let near: CGFloat = 1.06
+            var closer = CATransform3DMakeScale(near, near, 1)
+            closer = CATransform3DConcat(closer, CATransform3DMakeTranslation(-(near - 1) * size.width / 2, -(near - 1) * size.height / 2, 0))
+            let zoom = CABasicAnimation(keyPath: "transform")
+            zoom.fromValue = CATransform3DIdentity
+            zoom.toValue = closer
+            for animation in [soft, zoom] {
+                animation.duration = 1.4
+                animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                animation.fillMode = .forwards
+                animation.isRemovedOnCompletion = false
+                layer.add(animation, forKey: animation.keyPath)
+            }
+
+            let shade = CALayer()
+            shade.frame = CGRect(origin: CGPoint(x: -size.width, y: -size.height), size: CGSize(width: size.width * 3, height: size.height * 3))
+            shade.backgroundColor = NSColor.black.cgColor
+            shade.opacity = 0
+            layer.addSublayer(shade)
+            let dark = CABasicAnimation(keyPath: "opacity")
+            dark.fromValue = 0
+            dark.toValue = 0.22
+            dark.duration = 1.4
+            dark.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            let breathe = CABasicAnimation(keyPath: "opacity")
+            breathe.fromValue = 0.22
+            breathe.toValue = 0.08
+            breathe.beginTime = 1.4
+            breathe.duration = 1.6
+            breathe.autoreverses = true
+            breathe.repeatCount = .infinity
+            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            let group = CAAnimationGroup()
+            group.animations = [dark, breathe]
+            group.duration = .infinity
+            shade.add(group, forKey: "breathe")
+        }
+    }
+
     /// Fades the old wallpaper away once the new one shows: at once over a video's still (its first
     /// frame, under the video until it plays), else once the video's first frame is there (or a second
     /// and a half has gone); a picture has a moment to be drawn by macOS.
-    static func lift(_ windows: [NSWindow], keeping video: [AnyObject] = [], over duration: Double = duration, waited: Double = 0) {
+    static func lift(_ windows: [NSWindow], keeping video: [AnyObject] = [], over duration: Double = duration, waited: Double = 0,
+                     loading: Bool = false) {
         guard !windows.isEmpty else { return }
         let shown = LiveWallpaper.shared.url == nil ? waited >= 0.2 : (LiveWallpaper.shared.stillShown || LiveWallpaper.shared.ready)
         // a YouTube stream has no still: the old wallpaper waits for it (YouTube takes some seconds to answer)
         let youtube = LiveWallpaper.shared.url?.pathExtension == "youtube"
         if waited < (youtube ? 30 : 1.5) && !shown {
+            // still nothing after a moment: the old wallpaper goes soft while the new one comes
+            let wait = waited >= 0.15
+            if wait && !loading { soften(windows) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                lift(windows, keeping: video, over: duration, waited: waited + 0.05)
+                lift(windows, keeping: video, over: duration, waited: waited + 0.05, loading: loading || wait)
             }
             return
         }
