@@ -3885,7 +3885,7 @@ final class SettingsPopup: Popup {
             wallpaper.append(buttonRow("Wallpaper from YouTube", "Add") { [weak self] in self?.close(); YouTubeWallpaper.ask() })
         }
         if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
-            wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in YouTubeWallpaper.removeCurrent(); self?.refresh() })
+            wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in self?.close(); YouTubeWallpaper.removeCurrent() })
         }
         wallpaper.append(toggleRow("Blur wallpaper", WallpaperBlur.on) { WallpaperBlur.on = $0 })
         wallpaper.append(toggleRow("Video wallpaper stands still", LiveWallpaper.shared.frozen, note: "⌘⇧M") { LiveWallpaper.shared.frozen = $0 })
