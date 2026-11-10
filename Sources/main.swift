@@ -436,7 +436,7 @@ final class LiveWallpaper {
     }
 
     private func videoLayer(of window: NSWindow) -> AVPlayerLayer? {
-        window.contentView?.layer?.sublayers?.lazy.compactMap { $0 as? AVPlayerLayer }.first
+        window.contentView?.layer?.sublayers?.first?.sublayers?.lazy.compactMap { $0 as? AVPlayerLayer }.first
     }
 
     /// the new video has its first frame on every screen
@@ -446,7 +446,7 @@ final class LiveWallpaper {
 
     /// the video's still lies under it on every screen: the new wallpaper shows before the video plays
     var stillShown: Bool {
-        !windows.isEmpty && windows.allSatisfy { $0.contentView?.layer?.contents != nil }
+        !windows.isEmpty && windows.allSatisfy { $0.contentView?.layer?.sublayers?.first?.contents != nil }
     }
 
     /// the displays asleep
@@ -455,8 +455,10 @@ final class LiveWallpaper {
     func resume() { resting = false; if !frozen { player?.play(); remuxAgain() } }
 
     func layout() {
-        windows.forEach { $0.orderOut(nil) }
+        // the windows before fade away over the new (another screen, the blur turned on or off)
+        let before = windows
         windows = []
+        defer { WallpaperBlur.fadeOut(before) }
         guard let player else { return }
         windows = NSScreen.screens.map { screen in
             let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -474,23 +476,129 @@ final class LiveWallpaper {
             let view = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
             let base = CALayer()
             base.frame = view.bounds
+            base.masksToBounds = true
+            // the still and the video; blurred, a little over the screen on each side, so the blur's
+            // soft edges are off it
+            let art = CALayer()
+            let over = WallpaperBlur.on ? WallpaperBlur.radius * 2 : 0
+            art.frame = base.bounds.insetBy(dx: -over, dy: -over)
+            art.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             if let url, url.pathExtension != "youtube", let still = Crossfade.picture(Wallpapers.still(of: url), for: screen) {
-                base.contents = still
-                base.contentsGravity = .resizeAspectFill
-                base.masksToBounds = true
+                art.contents = still
+                art.contentsGravity = .resizeAspectFill
+                art.masksToBounds = true
             }
             let video = AVPlayerLayer(player: player)
             video.videoGravity = .resizeAspectFill
-            video.frame = base.bounds
+            video.frame = art.bounds
             video.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-            base.addSublayer(video)
+            art.addSublayer(video)
+            if WallpaperBlur.on { art.filters = WallpaperBlur.filters() }
+            base.addSublayer(art)
             view.layer = base
             view.wantsLayer = true
+            view.layerUsesCoreImageFilters = true
             window.contentView = view
             window.setFrame(screen.frame, display: true)
             window.orderFront(nil)
             return window
         }
+    }
+}
+
+/// Blur wallpaper (Settings › Wallpaper): the wallpaper soft under the windows, kept between launches. A video
+/// is blurred in its own windows (LiveWallpaper); a picture, set as the macOS wallpaper, is shown blurred in a
+/// window over it, one per screen, where the video would be. Turned on or off, it fades.
+enum WallpaperBlur {
+    static let radius: CGFloat = 30
+
+    static var on = UserDefaults.standard.bool(forKey: "wallpaperBlur") {
+        didSet {
+            UserDefaults.standard.set(on, forKey: "wallpaperBlur")
+            LiveWallpaper.shared.layout()
+            refresh(fadingIn: true)
+        }
+    }
+
+    static func filters() -> [CIFilter] {
+        guard let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: radius]) else { return [] }
+        return [blur]
+    }
+
+    private static let context = CIContext()
+
+    /// the picture blurred, its edges as solid as its middle
+    static func blurred(_ image: CGImage, for screen: NSScreen) -> CGImage? {
+        let picture = CIImage(cgImage: image)
+        let soft = picture.clampedToExtent().applyingGaussianBlur(sigma: Double(radius * screen.backingScaleFactor) / 2)
+            .cropped(to: picture.extent)
+        return context.createCGImage(soft, from: picture.extent)
+    }
+
+    private static var windows: [NSWindow] = []
+    private static var shown: [URL?] = []
+    private static var watching = false
+
+    /// The picture's blurred windows as things are now: none for a video, or with the blur off. Just turned
+    /// on, they fade in; else they come at once (a new wallpaper's are under the old one's crossfade).
+    static func refresh(fadingIn: Bool = false) {
+        if !watching {
+            watching = true
+            NotificationCenter.default.addObserver(forName: .wallpaperChanged, object: nil, queue: .main) { _ in refresh() }
+        }
+        let screens = NSScreen.screens
+        let urls: [URL?] = screens.map { NSWorkspace.shared.desktopImageURL(for: $0) }
+        let wanted = on && LiveWallpaper.shared.url == nil
+        // the same picture on the same screens: as it is
+        if wanted && urls == shown && windows.count == screens.count
+            && zip(windows, screens).allSatisfy({ $0.frame == $1.frame }) { return }
+        let before = windows
+        windows = []
+        shown = []
+        defer { fadeOut(before) }
+        guard wanted else { return }
+        shown = urls
+        windows = zip(screens, urls).compactMap { screen, url in
+            guard let url, let sharp = Crossfade.picture(url, for: screen), let image = blurred(sharp, for: screen) else { return nil }
+            let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+            window.ignoresMouseEvents = true
+            // where a video wallpaper is: over the macOS one, under the old one's crossfade and the icons
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+            let view = NSView()
+            let layer = CALayer()
+            layer.contents = image
+            layer.contentsGravity = .resizeAspectFill
+            layer.masksToBounds = true
+            view.layer = layer
+            view.wantsLayer = true
+            window.contentView = view
+            window.setFrame(screen.frame, display: true)
+            window.alphaValue = fadingIn ? 0 : 1
+            window.orderFront(nil)
+            if fadingIn {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.6
+                    window.animator().alphaValue = 1
+                }
+            }
+            return window
+        }
+    }
+
+    /// windows going: they fade away, then are gone
+    static func fadeOut(_ windows: [NSWindow]) {
+        guard !windows.isEmpty else { return }
+        windows.forEach { $0.orderFront(nil) }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.6
+            windows.forEach { $0.animator().alphaValue = 0 }
+        }, completionHandler: {
+            windows.forEach { $0.orderOut(nil) }
+        })
     }
 }
 
@@ -506,7 +614,9 @@ enum Crossfade {
     static func cover() -> [NSWindow] {
         NSScreen.screens.compactMap { screen in
             guard let url = NSWorkspace.shared.desktopImageURL(for: screen),
-                  let image = picture(url, for: screen) else { return nil }
+                  let sharp = picture(url, for: screen) else { return nil }
+            // as it is on the screen: blurred, when the wallpaper is
+            let image = LiveWallpaper.shared.url == nil && WallpaperBlur.on ? WallpaperBlur.blurred(sharp, for: screen) ?? sharp : sharp
             let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -3761,6 +3871,7 @@ final class SettingsPopup: Popup {
         if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
             wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in YouTubeWallpaper.removeCurrent(); self?.refresh() })
         }
+        wallpaper.append(toggleRow("Blur wallpaper", WallpaperBlur.on) { WallpaperBlur.on = $0 })
         wallpaper.append(toggleRow("Video wallpaper stands still", LiveWallpaper.shared.frozen, note: "⌘⇧M") { LiveWallpaper.shared.frozen = $0 })
         section("Wallpaper", wallpaper)
 
@@ -4008,6 +4119,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         windows.forEach { $0.place(on: screen) }
         showPieces(animated: false)
         LiveWallpaper.shared.layout()
+        WallpaperBlur.refresh()
         Tiler.shared.retile()
         showBar()
     }
