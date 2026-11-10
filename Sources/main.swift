@@ -3425,12 +3425,12 @@ final class Knocks {
         }
     }
 }
-// ── a snap of the fingers locks the screen ──
+// ── a snap of the fingers: the lock screen, or what is chosen ──
 
 /// The microphone, listened to for a snap of the fingers or a clap right at the screen: a click so loud only
 /// one that near makes it (`loud`), mostly
 /// high (over 2 kHz), short (gone within 40 ms) and alone (quiet just before). Then, if nothing was typed or
-/// clicked just before or after (a key's click is much like it), the lock screen. Nothing is recorded:
+/// clicked just before or after (a key's click is much like it), its action (the lock screen at first). Nothing is recorded:
 /// each 2.5 ms of sound is only measured. While it listens macOS shows its orange microphone dot.
 final class Snap {
     static let shared = Snap()
@@ -3440,6 +3440,12 @@ final class Snap {
     var on: Bool {
         get { UserDefaults.standard.object(forKey: "snapLock") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "snapLock"); newValue ? start() : stop() }
+    }
+
+    /// what a snap does (Settings › Screen): any of the knocks' actions; at first, the lock screen
+    var action: KnockAction {
+        get { KnockAction(rawValue: UserDefaults.standard.string(forKey: "snapAction") ?? "") ?? .lock }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "snapAction") }
     }
 
     private let engine = AVAudioEngine()
@@ -3570,10 +3576,10 @@ final class Snap {
             guard let self, self.heardAt == at else { return }
             let gap = abs(self.lastInput.timeIntervalSince(at))
             guard gap > 0.4, !LockScreen.shared.shown, CGDisplayIsAsleep(CGMainDisplayID()) == 0 else {
-                return Snap.log(String(format: "not locked: input %.2f s away, locked already %@", gap, LockScreen.shared.shown ? "yes" : "no"))
+                return Snap.log(String(format: "nothing: input %.2f s away, locked already %@", gap, LockScreen.shared.shown ? "yes" : "no"))
             }
-            Snap.log("locked")
-            LockScreen.shared.show()
+            Snap.log("→ \(self.action.title)")
+            self.action.run()
         }
     }
 
@@ -3893,8 +3899,14 @@ final class SettingsPopup: Popup {
 
         var screen: [NSView] = [
             buttonRow("Lock screen", "Lock", note: "⌃⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
-            toggleRow("Snap or clap to lock", Snap.shared.on) { Snap.shared.on = $0 },
+            toggleRow("Snap or clap", Snap.shared.on) { Snap.shared.on = $0 },
         ]
+        if Snap.shared.on {
+            let all = KnockAction.allCases
+            screen.append(choiceRow("Snap does", all.map(\.title), all.firstIndex(of: Snap.shared.action) ?? 0, indent: 18) {
+                Snap.shared.action = all[$0]
+            })
+        }
         if LidLight.shared.available {
             screen.append(toggleRow("Brightness by lid", LidLight.shared.on) { LidLight.shared.on = $0 })
         }
