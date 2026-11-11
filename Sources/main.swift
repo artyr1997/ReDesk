@@ -751,6 +751,8 @@ extension Notification.Name {
     static let wallpapersListed = Notification.Name("ReDeskWallpapersListed")
     /// tiling turned on or off, or another arrangement
     static let arrangementChanged = Notification.Name("ReDeskArrangementChanged")
+    /// another desktop in sight, or one more or fewer
+    static let desktopsChanged = Notification.Name("ReDeskDesktopsChanged")
 }
 
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
@@ -798,6 +800,10 @@ enum HotKeys {
             case 33: LockScreen.shared.show()
             case 34: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
             case 35: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
+            case 51: Desktops.shared.step(-1)
+            case 52: Desktops.shared.step(1)
+            case 53: Desktops.shared.take(-1)
+            case 54: Desktops.shared.take(1)
             default: break
             }
             return noErr
@@ -807,7 +813,10 @@ enum HotKeys {
             + commanded.map { ($0.id, $0.key, modifiers | UInt32(cmdKey)) }
             + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey)),
                (UInt32(33), kVK_ANSI_L, UInt32(cmdKey | controlKey)),
-               (UInt32(34), kVK_ANSI_Comma, modifiers), (UInt32(35), kVK_ANSI_Slash, modifiers)]
+               (UInt32(34), kVK_ANSI_Comma, modifiers), (UInt32(35), kVK_ANSI_Slash, modifiers),
+               // ⌥⌘↑ / ↓: the desktop above / below; with ⇧ the window in front goes along
+               (UInt32(51), kVK_UpArrow, UInt32(optionKey | cmdKey)), (UInt32(52), kVK_DownArrow, UInt32(optionKey | cmdKey)),
+               (UInt32(53), kVK_UpArrow, UInt32(optionKey | cmdKey | shiftKey)), (UInt32(54), kVK_DownArrow, UInt32(optionKey | cmdKey | shiftKey))]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
@@ -1234,6 +1243,14 @@ final class Tiler {
         }
     }
 
+    /// Now (another desktop in sight): the windows looked at again, and tiled if they changed.
+    func lookNow() {
+        guard on, AXIsProcessTrusted() else { return }
+        animation?.invalidate()
+        animation = nil
+        look()
+    }
+
     /// Whether a window out of sight still exists (a closed one, or one whose app quit, doesn't).
     private func alive(_ window: TiledWindow) -> Bool {
         var value: CFTypeRef?
@@ -1254,7 +1271,8 @@ final class Tiler {
 
     private func openWindows() -> [TiledWindow] {
         NSWorkspace.shared.runningApplications
-            .filter { tiledApps.contains($0.bundleIdentifier ?? "") && !$0.isHidden }
+            .filter { tiledApps.contains($0.bundleIdentifier ?? "") && !$0.isHidden
+                && Desktops.shared.desktop(of: $0) == Desktops.shared.current }
             .flatMap { app -> [TiledWindow] in
                 let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
                 return windows
@@ -2010,6 +2028,193 @@ final class DayView: DeskView {
     override func menuItems() -> [NSMenuItem] {
         let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
         return [NSMenuItem(title: time, action: nil, keyEquivalent: "")]
+    }
+}
+
+// ── desktops: ReDesk's own, one above another ──
+
+/// ReDesk's own desktops, one above another (⌥⌘↑ / ⌥⌘↓; with ⇧ the focused window goes along). Each of the
+/// Re apps is on one of them; the apps of the others are hidden, and tiling lays out only this one's. As many
+/// as are used, and an empty one under them to take a window to (emptied ones go). Going down the windows
+/// rise and fade away while the next desktop's rise into their places; going up, the other way.
+final class Desktops {
+    static let shared = Desktops()
+    /// how far the windows slide, going and coming
+    static let slide: CGFloat = 90
+
+    /// each app's desktop, by bundle identifier
+    private var place = UserDefaults.standard.dictionary(forKey: "desktopOf") as? [String: Int] ?? [:]
+    private(set) var current = UserDefaults.standard.integer(forKey: "desktop")
+    /// switching now: an app shown by it is no reason to switch again
+    private var switching = false
+
+    private var running: [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { tiledApps.contains($0.bundleIdentifier ?? "") }
+    }
+
+    func desktop(of app: NSRunningApplication) -> Int { place[app.bundleIdentifier ?? ""] ?? current }
+
+    /// the desktops in use, the one in sight among them, and the empty one under them
+    var count: Int {
+        let used = running.map(desktop).max() ?? -1
+        return max(used + 2, current + 1)
+    }
+
+    func start() {
+        normalize()
+        // the apps of the other desktops out of sight from the start
+        for app in running where desktop(of: app) != current && !app.isHidden { app.hide() }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            // a new app on the desktop in sight
+            guard let self, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let id = app.bundleIdentifier, tiledApps.contains(id) else { return }
+            self.place[id] = self.current
+            self.changed()
+        }
+        workspace.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.changed()
+        }
+        workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            // an app of another desktop brought forward (⌘Tab, the Dock, its corner word): to its desktop
+            guard let self, !self.switching, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  tiledApps.contains(app.bundleIdentifier ?? ""), self.desktop(of: app) != self.current else { return }
+            self.go(to: self.desktop(of: app))
+        }
+    }
+
+    /// ⌥⌘↑ / ⌥⌘↓: the desktop above or below
+    func step(_ by: Int) {
+        let to = current + by
+        guard to >= 0, to < count else { return }
+        go(to: to)
+    }
+
+    /// ⌥⌘⇧↑ / ⌥⌘⇧↓: the app in front to the desktop above or below, and there with it
+    func take(_ by: Int) {
+        guard let app = NSWorkspace.shared.frontmostApplication, let id = app.bundleIdentifier, tiledApps.contains(id) else { return }
+        let to = current + by
+        guard to >= 0, to < count else { return }
+        place[id] = to
+        go(to: to, keeping: app)
+    }
+
+    func go(to desktop: Int, keeping kept: NSRunningApplication? = nil) {
+        guard desktop != current else { return }
+        let down = desktop > current
+        let going = running.filter { self.desktop(of: $0) == current && $0 != kept && !$0.isHidden }
+        let coming = running.filter { self.desktop(of: $0) == desktop && $0 != kept }
+        switching = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.switching = false }
+        current = desktop
+        normalize()
+        // going down, everything rises: the windows going up and away, the coming ones up from under
+        let rise = down ? Self.slide : -Self.slide
+        for app in going {
+            let windows = Self.windows(of: app)
+            Self.slide(windows, by: rise)
+            DistributedNotificationCenter.default().postNotificationName(
+                .init("com.artursavytskyi.re.windows"), object: "hide \(app.processIdentifier)", userInfo: nil, deliverImmediately: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                // hidden (an app that didn't hear it, at once): back where they were, for the next time
+                if !app.isHidden { app.hide() }
+                for (window, frame) in windows { setFrame(of: window, to: frame, exact: true) }
+            }
+        }
+        for app in coming {
+            let shown = !app.isHidden
+            app.unhide()
+            guard !shown else { continue }
+            // a moment for the windows to be there again; they fade in (the app does), from under their places
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+                let windows = Self.windows(of: app)
+                for (window, frame) in windows { setFrame(of: window, to: frame.offsetBy(dx: 0, dy: -rise), exact: true) }
+                if !Tiler.shared.on { Self.slide(windows.map { ($0.0, $0.1.offsetBy(dx: 0, dy: -rise)) }, by: rise) }
+            }
+        }
+        // tiling: this desktop's windows to their places (the coming ones glide up into theirs)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { Tiler.shared.lookNow() }
+        if let kept { kept.activate() }
+        NotificationCenter.default.post(name: .desktopsChanged, object: nil)
+    }
+
+    /// emptied desktops gone (but the one in sight), the rest counted from 0, kept
+    private func normalize() {
+        let apps = running
+        var known: [String: Int] = [:]
+        for app in apps { if let id = app.bundleIdentifier { known[id] = desktop(of: app) } }
+        let used = Set(known.values).union([current]).sorted()
+        let index = Dictionary(uniqueKeysWithValues: used.enumerated().map { ($1, $0) })
+        place = known.mapValues { index[$0] ?? 0 }
+        current = index[current] ?? 0
+        UserDefaults.standard.set(place, forKey: "desktopOf")
+        UserDefaults.standard.set(current, forKey: "desktop")
+    }
+
+    private func changed() {
+        normalize()
+        NotificationCenter.default.post(name: .desktopsChanged, object: nil)
+    }
+
+    /// an app's standard windows and where they are
+    static func windows(of app: NSRunningApplication) -> [(AXUIElement, NSRect)] {
+        let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
+        return windows.compactMap { w in
+            guard attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole, let f = frame(of: w) else { return nil }
+            return (w, f)
+        }
+    }
+
+    /// windows glided up (or down) by `by` from where they are, easing out
+    static func slide(_ windows: [(AXUIElement, NSRect)], by: CGFloat, over duration: Double = 0.4) {
+        guard !windows.isEmpty else { return }
+        let begin = CACurrentMediaTime()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { timer in
+            let t = min((CACurrentMediaTime() - begin) / duration, 1)
+            let e = CGFloat(1 - pow(1 - t, 3))
+            for (window, from) in windows { setFrame(of: window, to: from.offsetBy(dx: 0, dy: by * e), size: false) }
+            if t >= 1 { timer.invalidate() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+}
+
+/// The desktops on the right edge, over the battery: a dash each, top to bottom, the one in sight longer and
+/// stronger. A click goes to one.
+final class DesktopsView: DeskView {
+    static let spacing: CGFloat = 16
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        NotificationCenter.default.addObserver(forName: .desktopsChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.needsDisplay = true
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// the dashes from the bottom of the view up: the last desktop lowest
+    private func centre(_ i: Int) -> CGFloat {
+        CGFloat(Desktops.shared.count - 1 - i) * Self.spacing + Self.spacing / 2
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let count = Desktops.shared.count
+        for i in 0..<count {
+            let now = i == Desktops.shared.current
+            let width: CGFloat = now ? 20 : 10
+            (now ? strong : faint).setFill()
+            NSBezierPath(roundedRect: NSRect(x: bounds.midX - width / 2, y: centre(i) - 1, width: width, height: 2),
+                         xRadius: 1, yRadius: 1).fill()
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let y = convert(event.locationInWindow, from: nil).y
+        let count = Desktops.shared.count
+        guard let nearest = (0..<count).min(by: { abs(centre($0) - y) < abs(centre($1) - y) }),
+              abs(centre(nearest) - y) <= Self.spacing / 2 else { return }
+        Desktops.shared.go(to: nearest)
     }
 }
 
@@ -3126,10 +3331,17 @@ enum KnockAction: String, CaseIterable {
         case .mute: Self.mediaKey(7)        // NX_KEYTYPE_MUTE
         case .screenshot: Self.keys(kVK_ANSI_3, [.maskCommand, .maskShift])
         case .hideWindows:  // any shown: all hidden; all hidden: all shown again
-            // each app fades its own windows out and hides, or shows them again fading in
+            // each app of this desktop fades its own windows out and hides, or shows them again fading in
+            // (the other desktops' stay hidden)
             let apps = Self.reApps(), hide = apps.contains { !$0.isHidden }
-            DistributedNotificationCenter.default().postNotificationName(
-                .init("com.artursavytskyi.re.windows"), object: hide ? "hide" : "show", userInfo: nil, deliverImmediately: true)
+            for app in apps {
+                if hide {
+                    DistributedNotificationCenter.default().postNotificationName(
+                        .init("com.artursavytskyi.re.windows"), object: "hide \(app.processIdentifier)", userInfo: nil, deliverImmediately: true)
+                } else {
+                    app.unhide()
+                }
+            }
             // an app that didn't hear it (an older build): at once, without the fade
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 for app in apps where app.isHidden != hide { _ = hide ? app.hide() : app.unhide() }
@@ -3148,9 +3360,11 @@ enum KnockAction: String, CaseIterable {
         }
     }
 
-    /// the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) that are running
+    /// the Re apps (ReFile, ReSurf, ReSound, ReNote, ReBook) running on the desktop in sight
     private static func reApps() -> [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter { tiledApps.contains($0.bundleIdentifier ?? "") }
+        NSWorkspace.shared.runningApplications.filter {
+            tiledApps.contains($0.bundleIdentifier ?? "") && Desktops.shared.desktop(of: $0) == Desktops.shared.current
+        }
     }
 
     /// the apps with windows, but ReDesk
@@ -4091,6 +4305,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one")]),
+            ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
@@ -4207,6 +4422,10 @@ final class Desk: NSObject, NSApplicationDelegate {
             let width = l.area.width * 0.24
             return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 9, width: width, height: 18)
         })
+        // the desktops over the battery, growing up from just above it (room for eight)
+        windows.append(DeskWindow(view: DesktopsView()) { l in
+            NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY + l.sideLength / 2 + 20, width: columnWidth, height: DesktopsView.spacing * 8)
+        })
         windows.append(DeskWindow(view: battery) { l in
             NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
         })
@@ -4256,6 +4475,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         LidLight.shared.start()
         Knocks.shared.start()
         Snap.shared.start()
+        Desktops.shared.start()
     }
 
     private var night = false

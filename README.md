@@ -22,6 +22,8 @@ Around them:
 
 **Flush** (⌘9, or Settings › Tile windows › Flush): no room between the tiled windows, and only the outer corners of them all rounded, so they make one window. ReDesk tells each app which of its window's corners are outer and which edges touch another window (a distributed notification, `com.artursavytskyi.re.corners`); the app rounds only those corners, draws no rim along those edges and casts no shadow while it has a neighbour.
 
+**Desktops**: ReDesk's own, one above another (macOS's Spaces are left alone). Each Re app is on one; the apps of the others are hidden, and tiling lays out only the one in sight. On the right edge over the battery, a dash for each, top to bottom, the one in sight longer; a click goes to one. ⌥⌘↑ / ⌥⌘↓ go up and down, ⌥⌘⇧↑ / ⌥⌘⇧↓ take the window in front along. As many as are used, and an empty one under them to take a window to; emptied ones go. A new app opens on the desktop in sight; bringing forward an app of another (⌘Tab, the Dock, its corner word) goes to that one. Going down, the windows rise and fade away (each app fades its own: `hide <pid>`) while the next desktop's fade in rising into their places; going up, the other way. Hide / Show Windows keeps to the desktop in sight. Kept between launches.
+
   Pick one in the right-click menu or with **⌘1…⌘8** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌃⌥⇧ arrows** move it to its neighbour's place. Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Pulling a window's edge resizes it within the arrangement: the cut between it and its neighbour moves, and the neighbour gives way as it goes (no part narrower than 240 points). **⌃⌥⌘ arrows** do the same from the keyboard: the border between the focused window and its neighbour moves that way, 80 points at a time, so a window on the left grows with → and one on the right with ← (the border on the right, or below, when the window has neighbours on both sides). The sizes are kept per arrangement and number of windows until ReDesk quits; choosing the arrangement already in use evens them out again. One at a Time and Full Screen have nothing to share, so there a resized window goes back. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
 
 **Keys**
@@ -34,6 +36,8 @@ Around them:
 | ⌘1…⌘8 | in the Re apps | an arrangement, tiling on |
 | ⌘0 | in the Re apps | Almost Full on / off |
 | ⌘9 | in the Re apps | Flush on / off |
+| ⌥⌘↑ / ⌥⌘↓ | anywhere | the desktop above / below |
+| ⌥⌘⇧↑ / ⌥⌘⇧↓ | anywhere | the window in front to the desktop above / below, and there with it |
 | ⌃⌥Space | anywhere | next arrangement |
 | ⌃⌥↩ | anywhere | the focused window becomes the main one |
 | ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |
