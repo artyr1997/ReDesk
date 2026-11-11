@@ -3499,8 +3499,26 @@ final class Snap {
 
     var on: Bool {
         get { UserDefaults.standard.object(forKey: "snapLock") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "snapLock"); newValue ? start() : stop() }
+        set { UserDefaults.standard.set(newValue, forKey: "snapLock"); listening = newValue; refresh() }
     }
+
+    /// Blowing on the Mac (Settings › Screen): the microphone hears wind, loud and low, held a moment.
+    var blowOn: Bool {
+        get { UserDefaults.standard.object(forKey: "blow") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "blow"); blowing = newValue; refresh() }
+    }
+
+    /// what blowing does: any of the knocks' actions; at first, Hide / Show Windows
+    var blowAction: KnockAction {
+        get { KnockAction(rawValue: UserDefaults.standard.string(forKey: "blowAction") ?? "") ?? .hideWindows }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "blowAction") }
+    }
+
+    /// how loud blowing must be (of full scale, all of the sound): the room and talking stay well under it
+    static let blowLoud: Float = 0.1
+
+    /// the microphone on while a snap or blowing is listened for, off when neither
+    private func refresh() { on || blowOn ? start() : stop() }
 
     /// what a snap does (Settings › Screen): any of the knocks' actions; at first, the lock screen
     var action: KnockAction {
@@ -3514,7 +3532,9 @@ final class Snap {
     private var lastInput = Date.distantPast
 
     func start() {
-        guard on, !running else { return }
+        listening = on
+        blowing = blowOn
+        guard on || blowOn, !running else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { granted in
@@ -3572,6 +3592,19 @@ final class Snap {
     private var blocks = [Float](repeating: 0, count: 50)
     private var block: Float = 0
     private var usual: Float = 0.001
+    /// the same for all of the sound, for blowing
+    private var blocksAll = [Float](repeating: 0, count: 50)
+    private var blockAll: Float = 0
+    private var usualAll: Float = 0.001
+    /// what is listened for (set on the main thread, read here)
+    private var listening = true
+    private var blowing = true
+    /// blowing now: its loud low frames, how loud and how high they were, the frames since the last one
+    private var blowFrames = 0
+    private var blowLevel: Float = 0
+    private var blowHigh: Float = 0
+    private var blowGap = 0
+    private var blowDone = false
 
     private func hear(_ buffer: AVAudioPCMBuffer) {
         guard let samples = buffer.floatChannelData?[0] else { return }
@@ -3598,11 +3631,17 @@ final class Snap {
         frames += 1
         // the room's usual: the strongest of each 20 ms over the last second, the quieter third's top
         block = max(block, level)
+        blockAll = max(blockAll, all)
         if frames % 8 == 0 {
             blocks[(frames / 8) % blocks.count] = block
             block = 0
             usual = blocks.sorted()[blocks.count / 3]
+            blocksAll[(frames / 8) % blocksAll.count] = blockAll
+            blockAll = 0
+            usualAll = blocksAll.sorted()[blocksAll.count / 3]
         }
+        if blowing && frames > 400 { blow(all: all, high: all > 0 ? level / all : 1) }
+        guard listening else { due = nil; return }
         if let start = due {
             guard n >= start + 24 else { return }
             due = nil
@@ -3624,7 +3663,39 @@ final class Snap {
         due = n
     }
 
+    /// Blowing on the microphone is wind: loud, nearly all of it low (under 2 kHz), and held. Frames like that
+    /// with gaps of under 0.1 s are one breath; 0.4 s of them is blowing, done once a breath. Each breath of
+    /// 0.1 s or more goes to the log, measured.
+    private func blow(all: Float, high: Float) {
+        if all > max(usualAll * 8, Snap.blowLoud) && high < 0.3 {
+            blowFrames += 1
+            blowLevel += all
+            blowHigh += high
+            blowGap = 0
+            if blowFrames == 160 && !blowDone {
+                blowDone = true
+                DispatchQueue.main.async { self.blown() }
+            }
+        } else if blowFrames > 0 {
+            blowGap += 1
+            guard blowGap > 40 else { return }
+            if blowFrames >= 40 {
+                let line = String(format: "breath: %.2f s, loud %.3f (usual %.4f), high %.2f%@", Double(blowFrames) / 400,
+                                  blowLevel / Float(blowFrames), usualAll, blowHigh / Float(blowFrames), blowDone ? ", blown" : "")
+                DispatchQueue.main.async { Snap.log(line) }
+            }
+            blowFrames = 0; blowLevel = 0; blowHigh = 0; blowGap = 0; blowDone = false
+        }
+    }
+
     // ── on the main thread ──
+
+    /// blowing: its action, unless locked or the displays asleep
+    private func blown() {
+        guard !LockScreen.shared.shown, CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return Snap.log("blown, but locked: nothing") }
+        Snap.log("blown → \(blowAction.title)")
+        blowAction.run()
+    }
 
     private var heardAt = Date.distantPast
 
@@ -3966,6 +4037,13 @@ final class SettingsPopup: Popup {
             let all = KnockAction.allCases
             screen.append(choiceRow("Snap does", all.map(\.title), all.firstIndex(of: Snap.shared.action) ?? 0, indent: 18) {
                 Snap.shared.action = all[$0]
+            })
+        }
+        screen.append(toggleRow("Blow on the Mac", Snap.shared.blowOn) { Snap.shared.blowOn = $0 })
+        if Snap.shared.blowOn {
+            let all = KnockAction.allCases
+            screen.append(choiceRow("Blowing does", all.map(\.title), all.firstIndex(of: Snap.shared.blowAction) ?? 0, indent: 18) {
+                Snap.shared.blowAction = all[$0]
             })
         }
         if LidLight.shared.available {
