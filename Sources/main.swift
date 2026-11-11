@@ -1,7 +1,7 @@
 // ReDesk: the Re apps and a few quiet gauges on the desktop.
-// Corners: the apps as words (a click opens one). Left edge: the wallpapers, pictures and videos, as dots
-// (wallpapers/Light or wallpapers/Dark, as the Mac's appearance is).
-// Top: the day. Right edge: the battery. Bottom: a wave while sound plays.
+// Corners: the apps as words (a click opens one). Top: the wallpapers, pictures and videos, as dots in a row
+// (wallpapers/Light or wallpapers/Dark, as the Mac's appearance is). Left edge: ReDesk's own desktops.
+// Right edge: the battery. Bottom: a wave while sound plays. (The day's line is out for now.)
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Knocks: two to five knocks on the MacBook, each an action.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
@@ -1967,7 +1967,7 @@ final class AppMenuBar: NSObject {
 final class WallpaperView: DeskView {
     static let dot: CGFloat = 6
 
-    /// distance between dots, top to bottom
+    /// distance between dots, left to right
     var spacing: CGFloat = 52
 
     private var chosen = Wallpapers.current
@@ -1994,14 +1994,14 @@ final class WallpaperView: DeskView {
     }
 
     private func centre(_ i: Int) -> NSPoint {
-        let first = bounds.midY + spacing * CGFloat(Wallpapers.all.count - 1) / 2
-        return NSPoint(x: bounds.midX, y: first - spacing * CGFloat(i))
+        let first = bounds.midX - spacing * CGFloat(Wallpapers.all.count - 1) / 2
+        return NSPoint(x: first + spacing * CGFloat(i), y: bounds.midY)
     }
 
     override func mouseDown(with event: NSEvent) {
-        let y = convert(event.locationInWindow, from: nil).y
-        let nearest = Wallpapers.all.indices.min { abs(centre($0).y - y) < abs(centre($1).y - y) }
-        if let nearest, abs(centre(nearest).y - y) <= spacing / 2 { Wallpapers.show(nearest) }
+        let x = convert(event.locationInWindow, from: nil).x
+        let nearest = Wallpapers.all.indices.min { abs(centre($0).x - x) < abs(centre($1).x - x) }
+        if let nearest, abs(centre(nearest).x - x) <= spacing / 2 { Wallpapers.show(nearest) }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -2225,7 +2225,7 @@ final class Desktops {
     }
 }
 
-/// The desktops on the right edge, over the battery: a dash each, top to bottom, the one in sight longer and
+/// The desktops on the left edge, around its middle: a dash each, top to bottom, the one in sight longer and
 /// stronger. A click goes to one.
 final class DesktopsView: DeskView {
     static let spacing: CGFloat = 16
@@ -2239,9 +2239,9 @@ final class DesktopsView: DeskView {
 
     required init?(coder: NSCoder) { nil }
 
-    /// the dashes from the bottom of the view up: the last desktop lowest
+    /// the dashes around the middle of the view, the first desktop highest
     private func centre(_ i: Int) -> CGFloat {
-        CGFloat(Desktops.shared.count - 1 - i) * Self.spacing + Self.spacing / 2
+        bounds.midY + (CGFloat(Desktops.shared.count - 1) / 2 - CGFloat(i)) * Self.spacing
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -4459,19 +4459,18 @@ final class Desk: NSObject, NSApplicationDelegate {
                 return NSRect(x: x, y: y, width: columnWidth, height: height)
             }
         }
+        // the wallpapers across the top, where the day's line was (the day is out for now)
         windows.append(DeskWindow(view: wallpapers) { [wallpapers] l in
-            let count = CGFloat(max(Wallpapers.all.count - 1, 1))
-            wallpapers.spacing = min(52, l.sideLength / count)
-            let height = wallpapers.spacing * count + wallpapers.spacing
-            return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
-        })
-        windows.append(DeskWindow(view: day) { l in
             let width = l.area.width * 0.24
-            return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 9, width: width, height: 18)
+            let count = CGFloat(max(Wallpapers.all.count - 1, 1))
+            wallpapers.spacing = min(52, width / count)
+            return NSRect(x: l.area.midX - width / 2 - wallpapers.spacing / 2, y: l.dayLine - 9,
+                          width: width + wallpapers.spacing, height: 18)
         })
-        // the desktops over the battery, growing up from just above it (room for eight)
+        // the desktops on the left edge, around its middle (room for eight)
         windows.append(DeskWindow(view: DesktopsView()) { l in
-            NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY + l.sideLength / 2 + 20, width: columnWidth, height: DesktopsView.spacing * 8)
+            let height = DesktopsView.spacing * 8
+            return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
         })
         windows.append(DeskWindow(view: battery) { l in
             NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
