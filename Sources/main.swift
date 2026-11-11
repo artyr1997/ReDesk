@@ -1443,6 +1443,8 @@ final class Tiler {
                 setFrame(of: move.window.element, to: move.to, exact: true)
                 self.settled[move.window] = frame(of: move.window.element) ?? move.to
             }
+            // again where they now are: an app takes the word only for the place its window is in
+            WindowJoins.tell(moves.map { ($0.window.element, $0.to) }, separate: !self.flush || self.arrangement.stacks)
         }
         let still = moves.allSatisfy { $0.from.integral == $0.to }
         guard !still, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return finish() }
