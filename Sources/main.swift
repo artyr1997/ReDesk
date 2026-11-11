@@ -862,16 +862,33 @@ enum CommandKeys {
     private static let letters = [kVK_ANSI_F: 0, kVK_ANSI_S: 1, kVK_ANSI_H: 2, kVK_ANSI_N: 3]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
-    /// and nothing being typed (a name being changed).
+    /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
     private static func deskInFront() -> Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication else { return true }
-        if front == NSRunningApplication.current { return true }
-        guard front.bundleIdentifier == "com.apple.finder" else { return false }
+        guard let front = NSWorkspace.shared.frontmostApplication else { log("no app in front: yes"); return true }
+        if front == NSRunningApplication.current { log("ReDesk in front: yes"); return true }
+        guard front.bundleIdentifier == "com.apple.finder" else { log("\(front.bundleIdentifier ?? "?") in front: no"); return false }
         let finder = AXUIElementCreateApplication(front.processIdentifier)
         if let focused = attribute(finder, kAXFocusedUIElementAttribute),
            let role = attribute(focused as! AXUIElement, kAXRoleAttribute) as? String,
-           role == kAXTextFieldRole || role == kAXTextAreaRole { return false }
-        return attribute(finder, kAXFocusedWindowAttribute) == nil
+           role == kAXTextFieldRole || role == kAXTextAreaRole { log("Finder, typing in a \(role): no"); return false }
+        guard let window = attribute(finder, kAXFocusedWindowAttribute) else { log("Finder, no window: yes"); return true }
+        // the desktop is no standard window
+        let subrole = attribute(window as! AXUIElement, kAXSubroleAttribute) as? String ?? "none"
+        let role = attribute(window as! AXUIElement, kAXRoleAttribute) as? String ?? "none"
+        let desk = subrole != kAXStandardWindowSubrole && subrole != kAXDialogSubrole
+        log("Finder, window \(role) / \(subrole): \(desk ? "yes" : "no")")
+        return desk
+    }
+
+    private static func log(_ line: String) {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ReDesk/Keys.log")
+        guard let data = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 
     private static func action(for event: CGEvent) -> (() -> Void)? {
@@ -2154,7 +2171,16 @@ final class Desktops {
         }
         // tiling: this desktop's windows to their places (the coming ones glide up into theirs)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { Tiler.shared.lookNow() }
-        if let kept { kept.activate() }
+        // in front: the window taken along, else the app with the biggest window here; on an empty desktop
+        // the desk itself (so F, S, H, N open the apps)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if let kept { kept.activate(); return }
+            let biggest = coming.max { a, b in
+                let area = { (app: NSRunningApplication) in Self.windows(of: app).map { $0.1.width * $0.1.height }.max() ?? 0 }
+                return area(a) < area(b)
+            }
+            if let biggest { biggest.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        }
         NotificationCenter.default.post(name: .desktopsChanged, object: nil)
     }
 
