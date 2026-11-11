@@ -858,8 +858,28 @@ enum CommandKeys {
 
     private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
 
+    /// F, S, H, N with the desk in front: the app of that letter's corner
+    private static let letters = [kVK_ANSI_F: 0, kVK_ANSI_S: 1, kVK_ANSI_H: 2, kVK_ANSI_N: 3]
+
+    /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
+    /// and nothing being typed (a name being changed).
+    private static func deskInFront() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return true }
+        if front == NSRunningApplication.current { return true }
+        guard front.bundleIdentifier == "com.apple.finder" else { return false }
+        let finder = AXUIElementCreateApplication(front.processIdentifier)
+        if let focused = attribute(finder, kAXFocusedUIElementAttribute),
+           let role = attribute(focused as! AXUIElement, kAXRoleAttribute) as? String,
+           role == kAXTextFieldRole || role == kAXTextAreaRole { return false }
+        return attribute(finder, kAXFocusedWindowAttribute) == nil
+    }
+
     private static func action(for event: CGEvent) -> (() -> Void)? {
         let flags = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
+        if flags.isEmpty, let corner = letters[Int(event.getIntegerValueField(.keyboardEventKeycode))],
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0, deskInFront() {
+            return { ReDesk.open(corners[corner]) }
+        }
         guard flags.contains(.maskCommand),
               tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") else { return nil }
         let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
@@ -4305,6 +4325,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one")]),
+            ("On the desk", [("F / S / H / N", "ReFile / ReSurf / ReSound / ReNote")]),
             ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),

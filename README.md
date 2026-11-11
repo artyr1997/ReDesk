@@ -36,6 +36,7 @@ Around them:
 | ⌘1…⌘8 | in the Re apps | an arrangement, tiling on |
 | ⌘0 | in the Re apps | Almost Full on / off |
 | ⌘9 | in the Re apps | Flush on / off |
+| F / S / H / N | on the desk (no app in front but ReDesk or Finder's desktop) | ReFile / ReSurf / ReSound / ReNote |
 | ⌥⌘↑ / ⌥⌘↓ | anywhere | the desktop above / below |
 | ⌥⌘⇧↑ / ⌥⌘⇧↓ | anywhere | the window in front to the desktop above / below, and there with it |
 | ⌃⌥Space | anywhere | next arrangement |
