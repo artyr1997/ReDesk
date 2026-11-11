@@ -3097,7 +3097,7 @@ final class LidLight {
 
 /// What a number of knocks does.
 enum KnockAction: String, CaseIterable {
-    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, file, surf, hear, note
+    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, blurWallpaper, file, surf, hear, note
 
     var title: String {
         switch self {
@@ -3110,6 +3110,7 @@ enum KnockAction: String, CaseIterable {
         case .closeWindows: return "Close All Windows"
         case .nextWallpaper: return "Next Wallpaper"
         case .freezeWallpaper: return "Pause Wallpaper"
+        case .blurWallpaper: return "Blur Wallpaper"
         case .file: return "Open ReFile"
         case .surf: return "Open ReSurf"
         case .hear: return "Open ReSound"
@@ -3139,6 +3140,7 @@ enum KnockAction: String, CaseIterable {
             Self.others().filter { !tiledApps.contains($0.bundleIdentifier ?? "") }.forEach(Self.closeWindows)
         case .nextWallpaper: Wallpapers.step(1)
         case .freezeWallpaper: LiveWallpaper.shared.frozen.toggle()
+        case .blurWallpaper: WallpaperBlur.on.toggle()
         case .file: ReDesk.open(corners[0])
         case .surf: ReDesk.open(corners[1])
         case .hear: ReDesk.open(corners[2])
