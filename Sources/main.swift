@@ -4358,22 +4358,22 @@ final class KeysPopup: Popup {
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
         ("Re:File", [
-            (nil, [("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
+            (nil, [("⌘N", "new window"), ("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
                    ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
         ]),
         ("Re:Surf", [
-            (nil, [("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⌘[ / ⌘]", "back / forward"),
+            (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⌘[ / ⌘]", "back / forward"),
                    ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘E", "e-ink"), ("⌘I", "info"), ("⌘J", "ReChat")]),
             ("Search", [("A / I / V", "all / images / videos"), ("F", "the same in Marginalia"), ("← / →", "previous / next page"),
                         ("↑ / ↓  Enter", "choose, open")]),
             ("ReChat", [("Enter", "send"), ("⇧Enter", "new line")]),
         ]),
         ("Re:Play", [
-            (nil, [("Space", "play / pause"), ("F7 F8 F9", "previous / play / next"), ("↑ ↓ ← →", "move"), ("Enter", "play"),
+            (nil, [("⌘N", "new window"), ("Space", "play / pause"), ("F7 F8 F9", "previous / play / next"), ("↑ ↓ ← →", "move"), ("Enter", "play"),
                    ("1 – 4", "tabs"), ("/", "search"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("N", "new playlist"), ("I", "info"), ("O", "open a video")]),
         ]),
         ("Re:Note", [
-            ("Notes", [("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
+            ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
                        ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
             ("A note", [("⌘S", "save"), ("⌥← / ⌥→", "previous / next note"), ("Esc", "back")]),
             ("Writing", [("⌘B", "highlight"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
