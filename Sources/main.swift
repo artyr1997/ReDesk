@@ -4370,7 +4370,7 @@ final class KeysPopup: Popup {
         ]),
         ("Re:Play", [
             (nil, [("Space", "play / pause"), ("F7 F8 F9", "previous / play / next"), ("↑ ↓ ← →", "move"), ("Enter", "play"),
-                   ("1 – 4", "tabs"), ("/", "search"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("N", "new playlist"), ("I", "info")]),
+                   ("1 – 4", "tabs"), ("/", "search"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("N", "new playlist"), ("I", "info"), ("O", "open a video")]),
         ]),
         ("Re:Note", [
             ("Notes", [("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
