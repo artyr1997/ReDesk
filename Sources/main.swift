@@ -4358,7 +4358,7 @@ final class KeysPopup: Popup {
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
         ("Re:File", [
-            (nil, [("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"),
+            (nil, [("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
                    ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
         ]),
         ("Re:Surf", [
