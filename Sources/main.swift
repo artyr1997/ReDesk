@@ -940,7 +940,8 @@ let edgeGap: CGFloat = 10
 enum WindowJoins {
     static let name = Notification.Name("com.artursavytskyi.re.corners")
 
-    static func tell(_ windows: [(element: AXUIElement, frame: NSRect)], separate: Bool) {
+    /// `pinned`: the windows pinned to their places (⌃⌥P), which write PIN down their left side.
+    static func tell(_ windows: [(element: AXUIElement, frame: NSRect)], separate: Bool, pinned: [AXUIElement] = []) {
         guard let top = NSScreen.screens.first?.frame.maxY else { return }
         for (i, (element, r)) in windows.enumerated() {
             var pid: pid_t = 0
@@ -966,7 +967,8 @@ enum WindowJoins {
                 }
             }
             // the window's place as the apps see it: from the top left of the main screen, in points
-            let info: [String: Any] = ["pid": Int(pid), "corners": corners, "edges": edges,
+            let pin = pinned.contains { CFEqual($0, element) } ? 1 : 0
+            let info: [String: Any] = ["pid": Int(pid), "corners": corners, "edges": edges, "pinned": pin,
                                        "x": Double(r.minX), "y": Double(top - r.maxY), "w": Double(r.width), "h": Double(r.height)]
             DistributedNotificationCenter.default().postNotificationName(name, object: nil, userInfo: info, deliverImmediately: true)
         }
@@ -1324,6 +1326,8 @@ final class Tiler {
         guard on, AXIsProcessTrusted(), let window = focusedWindow(), let at = order.firstIndex(of: window) else { return }
         if pinned[window] == nil { pinned[window] = at } else { pinned[window] = nil }
         if let r = place(of: window) { mark.flash(r, strong: pinned[window] != nil) }
+        // the window told, to write PIN or take it away
+        retile()
     }
 
     /// Keeps the turn of the windows in sight (after a swap, a move, a new main one) in `known`,
@@ -1515,7 +1519,8 @@ final class Tiler {
         remember()
         slots = places()
         // each app told which of its corners to round (all, but while Flush); stacked, each window is alone
-        WindowJoins.tell(zip(order, slots).map { ($0.element, $1) }, separate: !flush || arrangement.stacks)
+        WindowJoins.tell(zip(order, slots).map { ($0.element, $1) }, separate: !flush || arrangement.stacks,
+                         pinned: pinned.keys.map(\.element))
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
@@ -1532,7 +1537,8 @@ final class Tiler {
                 self.settled[move.window] = frame(of: move.window.element) ?? move.to
             }
             // again where they now are: an app takes the word only for the place its window is in
-            WindowJoins.tell(moves.map { ($0.window.element, $0.to) }, separate: !self.flush || self.arrangement.stacks)
+            WindowJoins.tell(moves.map { ($0.window.element, $0.to) }, separate: !self.flush || self.arrangement.stacks,
+                             pinned: self.pinned.keys.map(\.element))
         }
         let still = moves.allSatisfy { $0.from.integral == $0.to }
         guard !still, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return finish() }
