@@ -757,12 +757,14 @@ extension Notification.Name {
 
 /// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
 /// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement (⌘1…⌘8 pick one: CommandKeys),
-/// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place.
+/// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place,
+/// ⌃⌥P pins it (an anchor: it keeps its place).
 /// ⌘⇧T switches the Mac between light and dark.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
     private static let keys: [(id: UInt32, key: Int)] = [
         (1, kVK_UpArrow), (2, kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space), (6, kVK_LeftArrow), (7, kVK_RightArrow),
+        (8, kVK_ANSI_P),
     ]
     /// with ⌘ as well
     private static let commanded: [(id: UInt32, key: Int)] = [
@@ -787,6 +789,7 @@ enum HotKeys {
             case 5: Tiler.shared.nextArrangement()
             case 6: Tiler.shared.focus(.left)
             case 7: Tiler.shared.focus(.right)
+            case 8: Tiler.shared.togglePin()
             case 21: Tiler.shared.move(.up)
             case 22: Tiler.shared.move(.down)
             case 23: Tiler.shared.move(.left)
@@ -1132,6 +1135,13 @@ final class DropOverlay {
         window.alphaValue = 0
     }
 
+    /// A moment over `r`, then gone: brighter for a pin, fainter for letting go.
+    func flash(_ r: NSRect, strong: Bool) {
+        window.contentView?.alphaValue = strong ? 1 : 0.45
+        show(r)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.hide() }
+    }
+
     func show(_ r: NSRect) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
@@ -1197,6 +1207,9 @@ final class Tiler {
     /// hidden), so one coming back takes its old place instead of the newest one's
     private var known: [TiledWindow] = []
     private var slots: [NSRect] = []
+    /// pinned windows (⌃⌥P), each anchored to its place in the turn: windows coming and going, swaps and
+    /// a new main one leave it where it is
+    private var pinned: [TiledWindow: Int] = [:]
     /// where each window really ended up (a window may keep a size of its own), to tell when it is moved
     private var settled: [TiledWindow: NSRect] = [:]
 
@@ -1212,6 +1225,7 @@ final class Tiler {
     /// a part never gets smaller than this
     private let smallest: CGFloat = 240
     private let overlay = DropOverlay()
+    private let mark = DropOverlay()
 
     private struct Move { let window: TiledWindow; let from: NSRect; let to: NSRect }
     private var animation: Timer?
@@ -1270,7 +1284,8 @@ final class Tiler {
         let open = openWindows()
         known = known.filter { open.contains($0) || alive($0) }
         known = open.filter { !known.contains($0) } + known
-        let now = known.filter(open.contains)
+        pinned = pinned.filter { known.contains($0.key) }
+        let now = anchored(known.filter(open.contains))
         if now != order {
             order = now
             retile()
@@ -1293,6 +1308,22 @@ final class Tiler {
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(window.element, kAXRoleAttribute as CFString, &value)
         return error != .invalidUIElement && error != .cannotComplete
+    }
+
+    /// The windows in their turn, each pinned one put back at its place (or last, when there are fewer now).
+    private func anchored(_ windows: [TiledWindow]) -> [TiledWindow] {
+        var out = windows.filter { pinned[$0] == nil }
+        for (window, at) in pinned.filter({ windows.contains($0.key) }).sorted(by: { $0.value < $1.value }) {
+            out.insert(window, at: min(at, out.count))
+        }
+        return out
+    }
+
+    /// ⌃⌥P: the focused window pinned to its place, or let go again; a frame lights up over it for a moment.
+    func togglePin() {
+        guard on, AXIsProcessTrusted(), let window = focusedWindow(), let at = order.firstIndex(of: window) else { return }
+        if pinned[window] == nil { pinned[window] = at } else { pinned[window] = nil }
+        if let r = place(of: window) { mark.flash(r, strong: pinned[window] != nil) }
     }
 
     /// Keeps the turn of the windows in sight (after a swap, a move, a new main one) in `known`,
@@ -1350,7 +1381,8 @@ final class Tiler {
         if let resizing { return follow(resizing) }
         guard let dragged else { return }
         let point = NSEvent.mouseLocation
-        if let target = slots.firstIndex(where: { $0.contains(point) }), target != dragged {
+        if let target = slots.firstIndex(where: { $0.contains(point) }), target != dragged,
+           pinned[order[dragged]] == nil, pinned[order[target]] == nil {
             overlay.show(slots[target])
         } else {
             overlay.hide()
@@ -1366,7 +1398,8 @@ final class Tiler {
         guard on, animation == nil else { return }
         if let moved = movedWindow() {
             let drop = point ?? NSPoint(x: moved.frame.midX, y: moved.frame.midY)
-            if !arrangement.stacks, let target = slots.firstIndex(where: { $0.contains(drop) }), target != moved.index {
+            if !arrangement.stacks, let target = slots.firstIndex(where: { $0.contains(drop) }), target != moved.index,
+               pinned[order[moved.index]] == nil, pinned[order[target]] == nil {
                 order.swapAt(moved.index, target)
             }
             retile()
@@ -1550,7 +1583,7 @@ final class Tiler {
         guard on, AXIsProcessTrusted(), let current = focusedWindow(),
               let at = order.firstIndex(of: current),
               let target = neighbour(of: current, among: order, toward: direction),
-              let to = order.firstIndex(of: target) else { return }
+              let to = order.firstIndex(of: target), pinned[current] == nil, pinned[target] == nil else { return }
         order.swapAt(at, to)
         retile()
     }
@@ -1616,9 +1649,10 @@ final class Tiler {
         guard on, let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
               let focused = attribute(app as! AXUIElement, kAXFocusedWindowAttribute) else { return }
         let window = TiledWindow(element: focused as! AXUIElement)
-        guard let at = order.firstIndex(of: window), at > 0 else { return }
+        guard let at = order.firstIndex(of: window), at > 0, pinned[window] == nil else { return }
         order.remove(at: at)
         order.insert(window, at: 0)
+        order = anchored(order)
         retile()
     }
 }
@@ -4350,7 +4384,7 @@ final class KeysPopup: Popup {
                    ("⌘⇧M", "video wallpaper still / moving")]),
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
-                         ("⌃⌥↩", "the window becomes the main one")]),
+                         ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
             ("On the desk", [("F / S / P / N", "ReFile / ReSurf / RePlay / ReNote")]),
             ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
