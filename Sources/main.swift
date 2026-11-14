@@ -940,7 +940,7 @@ let edgeGap: CGFloat = 10
 enum WindowJoins {
     static let name = Notification.Name("com.artursavytskyi.re.corners")
 
-    /// `pinned`: the windows pinned to their places (⌃⌥P), which write PIN down their left side.
+    /// `pinned`: the windows pinned to their places (⌃⌥P), which write P in their top left corner.
     static func tell(_ windows: [(element: AXUIElement, frame: NSRect)], separate: Bool, pinned: [AXUIElement] = []) {
         guard let top = NSScreen.screens.first?.frame.maxY else { return }
         for (i, (element, r)) in windows.enumerated() {
