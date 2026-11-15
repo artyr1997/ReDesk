@@ -927,7 +927,7 @@ enum CommandKeys {
 // cut between it and its neighbour, which gives way as it goes; anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
-let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook"])
+let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook", "com.artursavytskyi.redraw"])
 /// between the windows: none while Flush (they make one window), else 10
 var tileGap: CGFloat { Tiler.shared.flush ? 0 : edgeGap }
 /// from the screen's edges in Almost Full

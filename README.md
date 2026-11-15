@@ -9,7 +9,7 @@ Around them:
 - **Right edge**: the battery, filling from the bottom.
 - **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept).
 
-**Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, RePlay, ReNote, ReBook) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest is the main one and the arrangement places the rest:
+**Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, RePlay, ReNote, ReBook, ReDraw) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest is the main one and the arrangement places the rest:
   - **Main and Stack**: the main one on the left half, the others one above another on the right
   - **Main on Top**: the main one across the top 60%, the others side by side under it
   - **Main in the Middle**: the main one in the middle half, the others shared out to the left and the right
