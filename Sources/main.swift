@@ -1343,8 +1343,8 @@ final class Tiler {
 
     private func openWindows() -> [TiledWindow] {
         NSWorkspace.shared.runningApplications
-            .filter { tiledApps.contains($0.bundleIdentifier ?? "") && !$0.isHidden
-                && Desktops.shared.desktop(of: $0) == Desktops.shared.current }
+            // the windows on other desktops are out of sight: not among them
+            .filter { tiledApps.contains($0.bundleIdentifier ?? "") && !$0.isHidden }
             .flatMap { app -> [TiledWindow] in
                 let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
                 return windows
@@ -2110,18 +2110,27 @@ final class DayView: DeskView {
 
 // ── desktops: ReDesk's own, one above another ──
 
-/// ReDesk's own desktops, one above another (⌥⌘↑ / ⌥⌘↓; with ⇧ the focused window goes along). Each of the
-/// Re apps is on one of them; the apps of the others are hidden, and tiling lays out only this one's. As many
-/// as are used, and an empty one under them to take a window to (emptied ones go). Going down the windows
-/// rise and fade away while the next desktop's rise into their places; going up, the other way.
+/// The window number (CGWindowID) behind an Accessibility window: it stays the same while the window is out
+/// of sight, where the Accessibility element does not.
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
+
+/// ReDesk's own desktops, one above another (⌥⌘↑ / ⌥⌘↓; with ⇧ the window in front goes along). Each window
+/// of the Re apps is on one of them, on its own (two windows of one app can be on two desktops); the windows
+/// of the others are out of sight (their app puts them away when asked: "hide-window <pid> <number>", and
+/// back, "show-window …"), and tiling lays out only this one's. As many as are used, and an empty one under
+/// them to take a window to (emptied ones go). Going down the windows rise and fade away while the next
+/// desktop's rise into their places; going up, the other way.
 final class Desktops {
     static let shared = Desktops()
     /// how far the windows slide, going and coming
     static let slide: CGFloat = 90
 
-    /// each app's desktop, by bundle identifier
-    private var place = UserDefaults.standard.dictionary(forKey: "desktopOf") as? [String: Int] ?? [:]
-    private(set) var current = UserDefaults.standard.integer(forKey: "desktop")
+    /// each window's desktop, by its number; a window not seen before is on the desktop in sight
+    private var place: [CGWindowID: Int] = [:]
+    /// the windows out of sight on another desktop: their app, and where they were
+    private var away: [CGWindowID: (pid: pid_t, frame: NSRect)] = [:]
+    private(set) var current = 0
     /// switching now: an app shown by it is no reason to switch again
     private var switching = false
 
@@ -2129,34 +2138,77 @@ final class Desktops {
         NSWorkspace.shared.runningApplications.filter { tiledApps.contains($0.bundleIdentifier ?? "") }
     }
 
-    func desktop(of app: NSRunningApplication) -> Int { place[app.bundleIdentifier ?? ""] ?? current }
+    static func number(of window: AXUIElement) -> CGWindowID? {
+        var id: CGWindowID = 0
+        return _AXUIElementGetWindow(window, &id) == .success && id != 0 ? id : nil
+    }
+
+    /// the Re apps' windows in sight now
+    private func shown() -> [(app: NSRunningApplication, element: AXUIElement, id: CGWindowID, frame: NSRect)] {
+        running.filter { !$0.isHidden }.flatMap { app in
+            Self.windows(of: app).compactMap { element, frame in
+                Self.number(of: element).map { (app, element, $0, frame) }
+            }
+        }
+    }
+
+    /// The windows looked at: new ones are on this desktop; closed ones, and those of apps that quit, forgotten.
+    private func learn() {
+        let here = shown()
+        let alive = Set(running.map(\.processIdentifier))
+        away = away.filter { alive.contains($0.value.pid) }
+        let seen = Set(here.map(\.id))
+        place = place.filter { seen.contains($0.key) || away[$0.key] != nil }
+        for window in here {
+            if place[window.id] == nil {
+                place[window.id] = current
+            } else if away[window.id] != nil {
+                // put away, but its app brought it back by itself: here now
+                away[window.id] = nil
+                place[window.id] = current
+            }
+        }
+    }
+
+    /// The desktop an app is on: this one while any of its windows is in sight, else the first of those it has away.
+    func desktop(of app: NSRunningApplication) -> Int {
+        if shown().contains(where: { $0.app == app }) { return current }
+        return away.filter { $0.value.pid == app.processIdentifier }.compactMap { place[$0.key] }.min() ?? current
+    }
 
     /// the desktops in use, the one in sight among them, and the empty one under them
     var count: Int {
-        let used = running.map(desktop).max() ?? -1
+        learn()
+        let used = place.values.max() ?? -1
         return max(used + 2, current + 1)
     }
 
     func start() {
-        normalize()
-        // the apps of the other desktops out of sight from the start
-        for app in running where desktop(of: app) != current && !app.isHidden { app.hide() }
+        // the apps an older ReDesk hid for its desktops (a whole app on each) back in sight, all on this one
+        if let old = UserDefaults.standard.dictionary(forKey: "desktopOf") as? [String: Int] {
+            let was = UserDefaults.standard.integer(forKey: "desktop")
+            for app in running where app.isHidden && old[app.bundleIdentifier ?? ""].map({ $0 != was }) == true { app.unhide() }
+            UserDefaults.standard.removeObject(forKey: "desktopOf")
+        }
+        UserDefaults.standard.set(0, forKey: "desktop")
         let workspace = NSWorkspace.shared.notificationCenter
-        workspace.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
-            // a new app on the desktop in sight
-            guard let self, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  let id = app.bundleIdentifier, tiledApps.contains(id) else { return }
-            self.place[id] = self.current
-            self.changed()
+        workspace.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.changed()
         }
         workspace.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.changed()
         }
         workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
-            // an app of another desktop brought forward (⌘Tab, the Dock, its corner word): to its desktop
+            // an app whose windows are all on another desktop brought forward (⌘Tab, the Dock, its corner word): there
             guard let self, !self.switching, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  tiledApps.contains(app.bundleIdentifier ?? ""), self.desktop(of: app) != self.current else { return }
-            self.go(to: self.desktop(of: app))
+                  tiledApps.contains(app.bundleIdentifier ?? "") else { return }
+            // a moment for a window it opens on its own to be there
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                guard !self.switching else { return }
+                self.learn()
+                let there = self.desktop(of: app)
+                if there != self.current { self.go(to: there) }
+            }
         }
     }
 
@@ -2167,77 +2219,83 @@ final class Desktops {
         go(to: to)
     }
 
-    /// ⌥⌘⇧↑ / ⌥⌘⇧↓: the app in front to the desktop above or below, and there with it
+    /// ⌥⌘⇧↑ / ⌥⌘⇧↓: the window in front (only it, not its app's others) to the desktop above or below, and there with it
     func take(_ by: Int) {
-        guard let app = NSWorkspace.shared.frontmostApplication, let id = app.bundleIdentifier, tiledApps.contains(id) else { return }
+        guard let app = NSWorkspace.shared.frontmostApplication, tiledApps.contains(app.bundleIdentifier ?? ""),
+              let focused = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedWindowAttribute),
+              let id = Self.number(of: focused as! AXUIElement) else { return }
         let to = current + by
         guard to >= 0, to < count else { return }
         place[id] = to
-        go(to: to, keeping: app)
+        go(to: to, keeping: id)
     }
 
-    func go(to desktop: Int, keeping kept: NSRunningApplication? = nil) {
+    private static func tell(_ what: String, _ pid: pid_t, _ id: CGWindowID) {
+        DistributedNotificationCenter.default().postNotificationName(
+            .init("com.artursavytskyi.re.windows"), object: "\(what) \(pid) \(id)", userInfo: nil, deliverImmediately: true)
+    }
+
+    func go(to desktop: Int, keeping kept: CGWindowID? = nil) {
         guard desktop != current else { return }
+        learn()
         let down = desktop > current
-        let going = running.filter { self.desktop(of: $0) == current && $0 != kept && !$0.isHidden }
-        let coming = running.filter { self.desktop(of: $0) == desktop && $0 != kept }
+        let going = shown().filter { $0.id != kept }
+        let coming = away.filter { place[$0.key] == desktop && $0.key != kept }
         switching = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.switching = false }
+        // the window taken along stays in sight: on the new desktop now
+        if let kept { place[kept] = desktop }
         current = desktop
-        normalize()
         // going down, everything rises: the windows going up and away, the coming ones up from under
         let rise = down ? Self.slide : -Self.slide
-        for app in going {
-            let windows = Self.windows(of: app)
-            Self.slide(windows, by: rise)
-            DistributedNotificationCenter.default().postNotificationName(
-                .init("com.artursavytskyi.re.windows"), object: "hide \(app.processIdentifier)", userInfo: nil, deliverImmediately: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                // hidden (an app that didn't hear it, at once): back where they were, for the next time
-                if !app.isHidden { app.hide() }
-                for (window, frame) in windows { setFrame(of: window, to: frame, exact: true) }
-            }
+        Self.slide(going.map { ($0.element, $0.frame) }, by: rise)
+        for window in going {
+            away[window.id] = (window.app.processIdentifier, window.frame)
+            Self.tell("hide-window", window.app.processIdentifier, window.id)
         }
-        for app in coming {
-            let shown = !app.isHidden
-            app.unhide()
-            guard !shown else { continue }
-            // a moment for the windows to be there again; they fade in (the app does), from under their places
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-                let windows = Self.windows(of: app)
-                for (window, frame) in windows { setFrame(of: window, to: frame.offsetBy(dx: 0, dy: -rise), exact: true) }
-                if !Tiler.shared.on { Self.slide(windows.map { ($0.0, $0.1.offsetBy(dx: 0, dy: -rise)) }, by: rise) }
-            }
+        for (id, was) in coming {
+            away[id] = nil
+            Self.tell("show-window", was.pid, id)
         }
+        // a moment for them to be there again: from under their places (they fade in: their app does), into them
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            let back = self.shown().filter { coming[$0.id] != nil }
+            for window in back { setFrame(of: window.element, to: coming[window.id]!.frame.offsetBy(dx: 0, dy: -rise), exact: true) }
+            if !Tiler.shared.on { Self.slide(back.map { ($0.element, coming[$0.id]!.frame.offsetBy(dx: 0, dy: -rise)) }, by: rise) }
+        }
+        normalize()
         // tiling: this desktop's windows to their places (the coming ones glide up into theirs)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { Tiler.shared.lookNow() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { Tiler.shared.lookNow() }
         // in front: the window taken along, else the app with the biggest window here; on an empty desktop
-        // the desk itself (so F, S, H, N open the apps)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if let kept { kept.activate(); return }
-            let biggest = coming.max { a, b in
-                let area = { (app: NSRunningApplication) in Self.windows(of: app).map { $0.1.width * $0.1.height }.max() ?? 0 }
-                return area(a) < area(b)
+        // the desk itself (so F, S, D, N open the apps)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if let kept, let window = self.shown().first(where: { $0.id == kept }) {
+                AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+                window.app.activate()
+                return
             }
-            if let biggest { biggest.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+            let here = self.shown()
+            if let biggest = here.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
+                AXUIElementPerformAction(biggest.element, kAXRaiseAction as CFString)
+                biggest.app.activate()
+            } else {
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
         NotificationCenter.default.post(name: .desktopsChanged, object: nil)
     }
 
-    /// emptied desktops gone (but the one in sight), the rest counted from 0, kept
+    /// emptied desktops gone (but the one in sight), the rest counted from 0
     private func normalize() {
-        let apps = running
-        var known: [String: Int] = [:]
-        for app in apps { if let id = app.bundleIdentifier { known[id] = desktop(of: app) } }
-        let used = Set(known.values).union([current]).sorted()
+        let used = Set(place.values).union([current]).sorted()
         let index = Dictionary(uniqueKeysWithValues: used.enumerated().map { ($1, $0) })
-        place = known.mapValues { index[$0] ?? 0 }
+        place = place.mapValues { index[$0] ?? 0 }
         current = index[current] ?? 0
-        UserDefaults.standard.set(place, forKey: "desktopOf")
         UserDefaults.standard.set(current, forKey: "desktop")
     }
 
     private func changed() {
+        learn()
         normalize()
         NotificationCenter.default.post(name: .desktopsChanged, object: nil)
     }
@@ -2246,7 +2304,8 @@ final class Desktops {
     static func windows(of app: NSRunningApplication) -> [(AXUIElement, NSRect)] {
         let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
         return windows.compactMap { w in
-            guard attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole, let f = frame(of: w) else { return nil }
+            guard attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole,
+                  attribute(w, kAXMinimizedAttribute) as? Bool != true, let f = frame(of: w) else { return nil }
             return (w, f)
         }
     }
