@@ -34,7 +34,7 @@ struct Corner {
 let corners = [
     Corner(word: "FILE", app: "ReFile", bundle: "com.artursavytskyi.refile", left: true, top: true),
     Corner(word: "SURF", app: "ReSurf", bundle: "com.artursavytskyi.resurf", left: false, top: true),
-    Corner(word: "PLAY", app: "RePlay", bundle: "com.artursavytskyi.resound", left: true, top: false),
+    Corner(word: "DRAW", app: "ReDraw", bundle: "com.artursavytskyi.redraw", left: true, top: false),
     Corner(word: "NOTE", app: "ReNote", bundle: "com.artursavytskyi.renote", left: false, top: false),
 ]
 
@@ -862,7 +862,7 @@ enum CommandKeys {
     private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
 
     /// F, S, H, N with the desk in front: the app of that letter's corner
-    private static let letters = [kVK_ANSI_F: 0, kVK_ANSI_S: 1, kVK_ANSI_P: 2, kVK_ANSI_H: 2, kVK_ANSI_N: 3]
+    private static let letters = [kVK_ANSI_F: 0, kVK_ANSI_S: 1, kVK_ANSI_D: 2, kVK_ANSI_N: 3]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
     /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
@@ -3404,7 +3404,7 @@ enum KnockAction: String, CaseIterable {
         case .blurWallpaper: return "Blur Wallpaper"
         case .file: return "Open ReFile"
         case .surf: return "Open ReSurf"
-        case .hear: return "Open RePlay"
+        case .hear: return "Open ReDraw"
         case .note: return "Open ReNote"
         }
     }
@@ -4391,7 +4391,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
-            ("On the desk", [("F / S / P / N", "ReFile / ReSurf / RePlay / ReNote")]),
+            ("On the desk", [("F / S / D / N", "ReFile / ReSurf / ReDraw / ReNote")]),
             ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
@@ -4410,9 +4410,9 @@ final class KeysPopup: Popup {
                         ("↑ / ↓  Enter", "choose, open")]),
             ("ReChat", [("Enter", "send"), ("⇧Enter", "new line")]),
         ]),
-        ("Re:Play", [
-            (nil, [("⌘N", "new window"), ("Space", "play / pause"), ("F7 F8 F9", "previous / play / next"), ("↑ ↓ ← →", "move"), ("Enter", "play"),
-                   ("1 – 4", "tabs"), ("/", "search"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("N", "new playlist"), ("I", "info"), ("O", "open a video")]),
+        ("Re:Draw", [
+            (nil, [("⌘N", "new window"), ("B / K / E", "pen / brush / rubber"), ("T", "the trackpad as a tablet"), ("1 – 4  [ ]", "line"),
+                   ("⌘Z / ⇧⌘Z", "undo / redo"), ("Backspace", "clear"), ("⌘S", "save a PNG"), ("I", "info")]),
         ]),
         ("Re:Note", [
             ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
