@@ -1342,14 +1342,17 @@ final class Tiler {
     }
 
     private func openWindows() -> [TiledWindow] {
-        NSWorkspace.shared.runningApplications
+        let visible = Desktops.onScreen()
+        return NSWorkspace.shared.runningApplications
             // the windows on other desktops are out of sight: not among them
             .filter { tiledApps.contains($0.bundleIdentifier ?? "") && !$0.isHidden }
             .flatMap { app -> [TiledWindow] in
                 let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
                 return windows
                     .filter { w in
-                        attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
+                        // put away on another desktop: Accessibility still lists it, the screen doesn't have it
+                        Desktops.number(of: w).map(visible.contains) ?? true
+                            && attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
                             && attribute(w, kAXMinimizedAttribute) as? Bool != true
                             && attribute(w, "AXFullScreen") as? Bool != true
                     }
@@ -2128,14 +2131,21 @@ final class Desktops {
 
     /// each window's desktop, by its number; a window not seen before is on the desktop in sight
     private var place: [CGWindowID: Int] = [:]
-    /// the windows out of sight on another desktop: their app, and where they were
-    private var away: [CGWindowID: (pid: pid_t, frame: NSRect)] = [:]
+    /// the windows out of sight on another desktop: their app, where they were, and when they were put away
+    private var away: [CGWindowID: (pid: pid_t, frame: NSRect, at: Date)] = [:]
     private(set) var current = 0
     /// switching now: an app shown by it is no reason to switch again
     private var switching = false
 
     private var running: [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter { tiledApps.contains($0.bundleIdentifier ?? "") }
+    }
+
+    /// The windows on the screen now, by number. Accessibility lists a window its app has put away too:
+    /// only this tells what is really in sight.
+    static func onScreen() -> Set<CGWindowID> {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+        return Set(list.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
     }
 
     static func number(of window: AXUIElement) -> CGWindowID? {
@@ -2145,9 +2155,10 @@ final class Desktops {
 
     /// the Re apps' windows in sight now
     private func shown() -> [(app: NSRunningApplication, element: AXUIElement, id: CGWindowID, frame: NSRect)] {
-        running.filter { !$0.isHidden }.flatMap { app in
+        let visible = Self.onScreen()
+        return running.filter { !$0.isHidden }.flatMap { app in
             Self.windows(of: app).compactMap { element, frame in
-                Self.number(of: element).map { (app, element, $0, frame) }
+                Self.number(of: element).flatMap { visible.contains($0) ? (app, element, $0, frame) : nil }
             }
         }
     }
@@ -2162,8 +2173,8 @@ final class Desktops {
         for window in here {
             if place[window.id] == nil {
                 place[window.id] = current
-            } else if away[window.id] != nil {
-                // put away, but its app brought it back by itself: here now
+            } else if let was = away[window.id], Date().timeIntervalSince(was.at) > 1.2 {
+                // put away (and done fading out a while ago), but its app brought it back by itself: here now
                 away[window.id] = nil
                 place[window.id] = current
             }
@@ -2191,6 +2202,13 @@ final class Desktops {
             UserDefaults.standard.removeObject(forKey: "desktopOf")
         }
         UserDefaults.standard.set(0, forKey: "desktop")
+        // the desktops start anew: windows put away before (by a ReDesk that quit) back in sight
+        let visible = Self.onScreen()
+        for app in running where !app.isHidden {
+            for (element, _) in Self.windows(of: app) {
+                if let id = Self.number(of: element), !visible.contains(id) { Self.tell("show-window", app.processIdentifier, id) }
+            }
+        }
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.changed()
@@ -2250,7 +2268,7 @@ final class Desktops {
         let rise = down ? Self.slide : -Self.slide
         Self.slide(going.map { ($0.element, $0.frame) }, by: rise)
         for window in going {
-            away[window.id] = (window.app.processIdentifier, window.frame)
+            away[window.id] = (window.app.processIdentifier, window.frame, Date())
             Self.tell("hide-window", window.app.processIdentifier, window.id)
         }
         for (id, was) in coming {
@@ -2258,7 +2276,7 @@ final class Desktops {
             Self.tell("show-window", was.pid, id)
         }
         // a moment for them to be there again: from under their places (they fade in: their app does), into them
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             let back = self.shown().filter { coming[$0.id] != nil }
             for window in back { setFrame(of: window.element, to: coming[window.id]!.frame.offsetBy(dx: 0, dy: -rise), exact: true) }
             if !Tiler.shared.on { Self.slide(back.map { ($0.element, coming[$0.id]!.frame.offsetBy(dx: 0, dy: -rise)) }, by: rise) }
