@@ -1253,6 +1253,33 @@ final class Tiler {
     private let mark = DropOverlay()
 
     private struct Move { let window: TiledWindow; let from: NSRect; let to: NSRect }
+
+    /// ~/Library/Application Support/ReDesk/Tiler.log: the turn and the pins as they change (to find why a pin goes)
+    static func log(_ line: String) {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ReDesk")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Tiler.log")
+        guard let data = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    private var lastSaid = ""
+    /// the turn (window numbers, pinned ones with their place) and those known out of sight, when it changed
+    private func say(_ why: String) {
+        let turn = order.map { w in "\(w.id ?? 0)" + (pinned[w].map { "📌\($0)" } ?? "") }.joined(separator: " ")
+        let away = known.filter { !order.contains($0) }.map { w in "\(w.id ?? 0)" + (pinned[w].map { "📌\($0)" } ?? "") }
+        let pins = pinned.map { "\($0.key.id ?? 0)@\($0.value)" }.sorted().joined(separator: ",")
+        let line = "[\(turn)] away [\(away.joined(separator: " "))] pins {\(pins)} desktop \(Desktops.shared.current)"
+        guard line != lastSaid else { return }
+        lastSaid = line
+        Self.log("\(why): \(line)")
+    }
     private var animation: Timer?
 
     /// ⌃⌥Space: turns tiling on, or moves to the next arrangement when it is on.
@@ -1307,13 +1334,16 @@ final class Tiler {
     private func look() {
         guard animation == nil else { return }
         let open = openWindows()
-        known = known.filter { open.contains($0) || alive($0) }
+        let gone = known.filter { !open.contains($0) && !alive($0) }
+        if !gone.isEmpty { Self.log("gone: \(gone.map { "\($0.id ?? 0)" + (pinned[$0] != nil ? "📌" : "") })") }
+        known = known.filter { !gone.contains($0) }
         known = open.filter { !known.contains($0) } + known
         pinned = pinned.filter { known.contains($0.key) }
         fresh(open)
         let now = anchored(known.filter(open.contains))
         if now != order {
             order = now
+            say("look")
             retile()
         } else {
             // moved without the mouse (the keyboard, the app itself): back to its place
@@ -1328,11 +1358,14 @@ final class Tiler {
         animation?.invalidate()
         animation = nil
         let open = openWindows()
-        known = known.filter { open.contains($0) || alive($0) }
+        let gone = known.filter { !open.contains($0) && !alive($0) }
+        if !gone.isEmpty { Self.log("gone: \(gone.map { "\($0.id ?? 0)" + (pinned[$0] != nil ? "📌" : "") })") }
+        known = known.filter { !gone.contains($0) }
         known = open.filter { !known.contains($0) } + known
         pinned = pinned.filter { known.contains($0.key) }
         fresh(open)
         order = anchored(known.filter(open.contains))
+        say("desktop")
         retile()
     }
 
@@ -1342,6 +1375,9 @@ final class Tiler {
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(window.element, kAXRoleAttribute as CFString, &value)
         if error != .invalidUIElement && error != .cannotComplete { return true }
+        // put away on another desktop by ReDesk: its element doesn't answer and the window server doesn't
+        // list it, but it is there, and comes back
+        if let id = window.id, Desktops.shared.holds(id) { return true }
         guard let id = window.id,
               let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]] else { return false }
         return list.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
@@ -1369,6 +1405,7 @@ final class Tiler {
     func togglePin() {
         guard on, AXIsProcessTrusted(), let window = focusedWindow(), let at = order.firstIndex(of: window) else { return }
         if pinned[window] == nil { pinned[window] = at } else { pinned[window] = nil }
+        say(pinned[window] == nil ? "unpin \(window.id ?? 0)" : "pin \(window.id ?? 0)")
         if let r = place(of: window) { mark.flash(r, strong: pinned[window] != nil) }
         // the window told, to write PIN or take it away
         retile()
@@ -2235,6 +2272,9 @@ final class Desktops {
         }
     }
 
+    /// whether a window is put away on another desktop
+    func holds(_ id: CGWindowID) -> Bool { away[id] != nil }
+
     /// The desktop an app is on: this one while any of its windows is in sight, else the first of those it has away.
     func desktop(of app: NSRunningApplication) -> Int {
         if shown().contains(where: { $0.app == app }) { return current }
@@ -2266,6 +2306,9 @@ final class Desktops {
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.changed()
+        }
+        workspace.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { _ in
+            Tiler.log("macOS space changed")
         }
         workspace.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.changed()
@@ -2321,6 +2364,7 @@ final class Desktops {
         // going down, everything rises: the windows going up and away, the coming ones up from under
         let rise = down ? Self.slide : -Self.slide
         let leaving = Set(going.map(\.id))
+        Tiler.log("go → \(desktop): going \(going.map(\.id)) coming \(Array(coming.keys))")
         Tiler.shared.leaving.subtract(coming.keys)
         Tiler.shared.leaving.formUnion(leaving)
         // put away by then (their app fades them out): off the screen, so no longer looked at anyway
