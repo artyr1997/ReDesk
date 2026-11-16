@@ -38,11 +38,11 @@ func tr(_ words: String) -> String {
 }
 
 private let japaneseWords: [String: String] = [
-    // ── the corner words ──
+    // ── the corner words: four characters, as FILE, SURF… ──
     "FILE": "ファイル",
-    "SURF": "ウェブ",
-    "DRAW": "描画",
-    "NOTE": "ノート",
+    "SURF": "ブラウザ",
+    "DRAW": "お絵描き",
+    "NOTE": "覚え書き",
 
     // ── settings ──
     "Desk": "デスク",
