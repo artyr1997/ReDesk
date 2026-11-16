@@ -2816,11 +2816,11 @@ enum YouTubeWallpaper {
             field.stringValue = clip
         }
         let alert = NSAlert()
-        alert.messageText = "Wallpaper from YouTube"
-        alert.informativeText = "Paste a link: the video plays from YouTube in its best quality, without sound."
+        alert.messageText = tr("Wallpaper from YouTube")
+        alert.informativeText = tr("Paste a link: the video plays from YouTube in its best quality, without sound.")
         alert.accessoryView = field
-        alert.addButton(withTitle: "Add")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: tr("Add"))
+        alert.addButton(withTitle: tr("Cancel"))
         NSApp.activate(ignoringOtherApps: true)
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -2833,8 +2833,8 @@ enum YouTubeWallpaper {
         DispatchQueue.main.async {
             progress = nil
             let alert = NSAlert()
-            alert.messageText = "No wallpaper from YouTube"
-            alert.informativeText = message
+            alert.messageText = tr("No wallpaper from YouTube")
+            alert.informativeText = tr(message)
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
@@ -3105,7 +3105,7 @@ final class LockFace: NSView {
         guard main else { return }
         drawLife()
         drawDiamond(at: corner, color: field != nil ? ink(0.95) : strong)
-        let hint = NSAttributedString(string: "UNLOCK", attributes: [
+        let hint = NSAttributedString(string: tr("UNLOCK"), attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let h = hint.size()
@@ -4213,21 +4213,22 @@ class Popup: NSPanel {
     // ── pieces ──
 
     func heading(_ words: String) -> NSTextField {
-        NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
+        NSTextField(labelWithAttributedString: NSAttributedString(string: tr(words).uppercased(), attributes: [
             .font: Self.noto(18), .foregroundColor: Self.text, .kern: 7.2,
         ]))
     }
 
     /// a section's name: small, spaced, quiet
     func caption(_ words: String) -> NSTextField {
-        NSTextField(labelWithAttributedString: NSAttributedString(string: words.uppercased(), attributes: [
+        NSTextField(labelWithAttributedString: NSAttributedString(string: tr(words).uppercased(), attributes: [
             .font: Self.noto(11), .foregroundColor: Self.text.withAlphaComponent(0.6), .kern: 2.2,
         ]))
     }
 
     func words(_ words: String, size: CGFloat = 14, alpha: CGFloat = 1) -> NSTextField {
-        let field = NSTextField(wrappingLabelWithString: words)
-        field.font = Self.kurale(size)
+        let field = NSTextField(wrappingLabelWithString: tr(words))
+        // Kurale has no kana or kanji: in Japanese, Noto Sans JP, a little smaller
+        field.font = Language.isJapanese ? Self.noto(size - 1) : Self.kurale(size)
         field.textColor = Self.text.withAlphaComponent(alpha)
         field.isSelectable = false
         return field
@@ -4235,7 +4236,7 @@ class Popup: NSPanel {
 
     /// keys, as the apps write them: Noto Sans JP, small, quieter
     func keys(_ keys: String) -> NSTextField {
-        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: keys, attributes: [
+        let field = NSTextField(labelWithAttributedString: NSAttributedString(string: tr(keys), attributes: [
             .font: Self.noto(11), .foregroundColor: Self.text.withAlphaComponent(0.6), .kern: 0.55,
         ]))
         field.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -4262,7 +4263,7 @@ class Popup: NSPanel {
     func button(_ title: String, alpha: CGFloat = 1, _ press: @escaping (NSButton) -> Void) -> NSButton {
         let button = NSButton(title: "", target: nil, action: nil)
         button.isBordered = false
-        button.attributedTitle = NSAttributedString(string: title.uppercased(), attributes: [
+        button.attributedTitle = NSAttributedString(string: tr(title).uppercased(), attributes: [
             .font: Self.noto(12), .foregroundColor: Self.text.withAlphaComponent(alpha), .kern: 2.4,
         ])
         let action = act { sender in if let b = sender as? NSButton { press(b) } }
@@ -4298,6 +4299,7 @@ class Popup: NSPanel {
 
     /// the chosen one's name; a click lists the others
     func choiceRow(_ name: String, _ choices: [String], _ chosen: Int, indent: CGFloat = 0, note: String? = nil, _ change: @escaping (Int) -> Void) -> NSView {
+        let choices = choices.map(tr)
         let control = button(choices[chosen] + "  ▾") { [weak self] button in
             guard let self else { return }
             let menu = NSMenu()
@@ -4393,6 +4395,8 @@ final class SettingsPopup: Popup {
                 }
             },
         ]
+        let languages = Language.allCases
+        desk.append(choiceRow("Language", languages.map(\.title), languages.firstIndex(of: Language.current) ?? 0) { Language.current = languages[$0] })
         section("Desk", desk)
 
         var wallpaper: [NSView] = []

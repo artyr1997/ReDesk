@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 APP=build/ReDesk.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swiftc -O -o "$APP/Contents/MacOS/ReDesk" Sources/main.swift
+swiftc -O -o "$APP/Contents/MacOS/ReDesk" Sources/*.swift
 cp Info.plist "$APP/Contents/"
 cp Resources/* "$APP/Contents/Resources/"
 cp -R wallpapers "$APP/Contents/Resources/"
