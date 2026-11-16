@@ -978,11 +978,26 @@ enum WindowJoins {
     }
 }
 
-/// An Accessibility window, comparable so the order can be kept between looks.
+/// An Accessibility window, comparable so the order can be kept between looks. Known by its window
+/// number: put away on another desktop and shown again, a window may come back as another Accessibility
+/// element (taken for a new window, it lost its place in the turn and its pin); its number stays.
 struct TiledWindow: Hashable {
     let element: AXUIElement
-    static func == (a: Self, b: Self) -> Bool { CFEqual(a.element, b.element) }
-    func hash(into hasher: inout Hasher) { hasher.combine(CFHash(element)) }
+    let id: CGWindowID?
+
+    init(element: AXUIElement) {
+        self.element = element
+        id = Desktops.number(of: element)
+    }
+
+    static func == (a: Self, b: Self) -> Bool {
+        if let x = a.id, let y = b.id { return x == y }
+        return CFEqual(a.element, b.element)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        if let id { hasher.combine(id) } else { hasher.combine(CFHash(element)) }
+    }
 }
 
 private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -1295,6 +1310,7 @@ final class Tiler {
         known = known.filter { open.contains($0) || alive($0) }
         known = open.filter { !known.contains($0) } + known
         pinned = pinned.filter { known.contains($0.key) }
+        fresh(open)
         let now = anchored(known.filter(open.contains))
         if now != order {
             order = now
@@ -1315,15 +1331,29 @@ final class Tiler {
         known = known.filter { open.contains($0) || alive($0) }
         known = open.filter { !known.contains($0) } + known
         pinned = pinned.filter { known.contains($0.key) }
+        fresh(open)
         order = anchored(known.filter(open.contains))
         retile()
     }
 
-    /// Whether a window out of sight still exists (a closed one, or one whose app quit, doesn't).
+    /// Whether a window out of sight still exists (a closed one, or one whose app quit, doesn't): its element
+    /// answers, or the window server still has its number (put away, its element may not answer).
     private func alive(_ window: TiledWindow) -> Bool {
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(window.element, kAXRoleAttribute as CFString, &value)
-        return error != .invalidUIElement && error != .cannotComplete
+        if error != .invalidUIElement && error != .cannotComplete { return true }
+        guard let id = window.id,
+              let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]] else { return false }
+        return list.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
+    }
+
+    /// The windows in sight now with their elements as they are now (a window shown again may have a new one),
+    /// in the turn, the pins and where they settled.
+    private func fresh(_ open: [TiledWindow]) {
+        let now = Dictionary(open.map { ($0, $0) }, uniquingKeysWith: { a, _ in a })
+        known = known.map { now[$0] ?? $0 }
+        pinned = Dictionary(pinned.map { (now[$0.key] ?? $0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
+        settled = Dictionary(settled.map { (now[$0.key] ?? $0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
     }
 
     /// The windows in their turn, each pinned one put back at its place (or last, when there are fewer now).
@@ -1370,7 +1400,7 @@ final class Tiler {
                             && attribute(w, kAXMinimizedAttribute) as? Bool != true
                             && attribute(w, "AXFullScreen") as? Bool != true
                     }
-                    .map(TiledWindow.init)
+                    .map { TiledWindow(element: $0) }
             }
     }
 
