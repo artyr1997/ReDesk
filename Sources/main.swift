@@ -2615,58 +2615,6 @@ final class WaveView: NSView {
     }
 }
 
-// ── the time: the hour right against the camera's notch on its left, the minutes on its right ──
-
-/// The top of the screen by the notch: its band (as tall as the menu bar there) and the notch across it.
-/// A screen without one: an imaginary narrow notch in the middle.
-func notchBand(_ screen: NSScreen) -> (band: NSRect, notch: ClosedRange<CGFloat>) {
-    let top = max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
-    let band = NSRect(x: screen.frame.minX, y: screen.frame.maxY - top, width: screen.frame.width, height: top)
-    if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea, right.minX > left.maxX {
-        return (band, left.maxX ... right.minX)
-    }
-    return (band, screen.frame.midX - 12 ... screen.frame.midX + 12)
-}
-
-final class ClockView: DeskView {
-    static let font = NSFont(name: "NotoSansJP-Regular", size: 15) ?? .monospacedDigitSystemFont(ofSize: 15, weight: .light)
-    /// from the notch's edges to the numbers
-    static let gap: CGFloat = 10
-    /// as wide as the numbers' side of the window
-    static let side: CGFloat = 64
-    private var timer: Timer?
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        next()
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    /// redrawn as each minute begins
-    private func next() {
-        let now = Date()
-        let wait = 60 - now.timeIntervalSince1970.truncatingRemainder(dividingBy: 60) + 0.05
-        timer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
-            self?.needsDisplay = true
-            self?.next()
-        }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let parts = Calendar.current.dateComponents([.hour, .minute], from: Date())
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Self.font, .kern: 0.4 * Self.font.pointSize, .foregroundColor: ink(0.95),
-        ]
-        let hour = NSAttributedString(string: String(format: "%02d", parts.hour ?? 0), attributes: attributes)
-        let minute = NSAttributedString(string: String(format: "%02d", parts.minute ?? 0), attributes: attributes)
-        let h = hour.size(), m = minute.size()
-        // the hour's last letter space dropped, so it ends right at the gap
-        hour.draw(at: NSPoint(x: Self.side - Self.gap - h.width + 0.4 * Self.font.pointSize, y: (bounds.height - h.height) / 2))
-        minute.draw(at: NSPoint(x: bounds.width - Self.side + Self.gap, y: (bounds.height - m.height) / 2))
-    }
-}
-
 final class DeskWindow: NSWindow {
     /// where this piece goes on a screen
     let frameOn: (Layout) -> NSRect
@@ -4649,17 +4597,6 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let strip = AppStripView()
     /// placed by showStrip(), over the strip the hidden menu bar leaves at the top of the screen
     private lazy var stripWindow = DeskWindow(view: strip) { l in l.area }
-    /// the time, by the notch: always there (also in Almost Full), the clicks going through it
-    private lazy var clockWindow: DeskWindow = {
-        let window = DeskWindow(view: ClockView()) { l in
-            guard let screen = NSScreen.screens.first else { return .zero }
-            let (band, notch) = notchBand(screen)
-            return NSRect(x: notch.lowerBound - ClockView.side, y: band.minY,
-                          width: notch.upperBound - notch.lowerBound + ClockView.side * 2, height: band.height)
-        }
-        window.ignoresMouseEvents = true
-        return window
-    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // ReDesk shows no menu bar, but its fields (the YouTube link, the birthday) still want ⌘X ⌘C ⌘V ⌘A ⌘Z:
@@ -4793,8 +4730,6 @@ final class Desk: NSObject, NSApplicationDelegate {
         WallpaperBlur.refresh()
         Tiler.shared.retile()
         showBar()
-        // over the apps' strip, when it's there
-        clockWindow.place(on: screen)
     }
 
     /// The desk's own pieces (the corner words, the dots, the day line, the battery, the wave): gone in
