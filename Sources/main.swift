@@ -2566,18 +2566,17 @@ final class DesktopsView: DeskView {
 final class BatteryView: DeskView {
     var level = batteryLevel()
 
-    /// a line across the top, filled from both its ends toward the middle as far as charged
+    /// a line across the top, filled from the middle out toward both its ends as far as charged
     override func draw(_ dirtyRect: NSRect) {
         guard let level else { return }
         let line = NSRect(x: 0, y: bounds.midY - barWidth / 2, width: bounds.width, height: barWidth)
         let radius = barWidth / 2
         faint.setFill()
         NSBezierPath(roundedRect: line, xRadius: radius, yRadius: radius).fill()
-        let each = line.width / 2 * CGFloat(max(0, min(level, 1)))
-        guard each > 0 else { return }
+        let width = line.width * CGFloat(max(0, min(level, 1)))
+        guard width > 0 else { return }
         strong.setFill()
-        NSBezierPath(roundedRect: NSRect(x: line.minX, y: line.minY, width: each, height: line.height), xRadius: radius, yRadius: radius).fill()
-        NSBezierPath(roundedRect: NSRect(x: line.maxX - each, y: line.minY, width: each, height: line.height), xRadius: radius, yRadius: radius).fill()
+        NSBezierPath(roundedRect: NSRect(x: line.midX - width / 2, y: line.minY, width: width, height: line.height), xRadius: radius, yRadius: radius).fill()
     }
 
     override func menuItems() -> [NSMenuItem] {
