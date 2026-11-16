@@ -6,11 +6,14 @@ enum Language: String, CaseIterable {
     case english = "en", japanese = "ja"
 
     static let key = "language"
+    /// said in ReDesk when the language changes
+    static let changed = Notification.Name("ReDeskLanguageChanged")
 
     static var current: Language {
         get { Language(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .english }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: key)
+            NotificationCenter.default.post(name: changed, object: nil)
             // the Re apps write their buttons in it too
             DistributedNotificationCenter.default().postNotificationName(
                 Notification.Name("com.artursavytskyi.re.language"), object: newValue.rawValue, userInfo: nil, deliverImmediately: true)
@@ -35,6 +38,12 @@ func tr(_ words: String) -> String {
 }
 
 private let japaneseWords: [String: String] = [
+    // ── the corner words ──
+    "FILE": "ファイル",
+    "SURF": "ウェブ",
+    "DRAW": "描画",
+    "NOTE": "ノート",
+
     // ── settings ──
     "Desk": "デスク",
     "Language": "言語",

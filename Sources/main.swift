@@ -24,7 +24,10 @@ import Network
 import ServiceManagement
 
 struct Corner {
-    let word: String
+    /// its word in English: FILE, SURF…
+    let name: String
+    /// its word on the desk, in the desk's language
+    var word: String { tr(name) }
     let app: String
     let bundle: String
     let left: Bool
@@ -32,10 +35,10 @@ struct Corner {
 }
 
 let corners = [
-    Corner(word: "FILE", app: "ReFile", bundle: "com.artursavytskyi.refile", left: true, top: true),
-    Corner(word: "SURF", app: "ReSurf", bundle: "com.artursavytskyi.resurf", left: false, top: true),
-    Corner(word: "DRAW", app: "ReDraw", bundle: "com.artursavytskyi.redraw", left: true, top: false),
-    Corner(word: "NOTE", app: "ReNote", bundle: "com.artursavytskyi.renote", left: false, top: false),
+    Corner(name: "FILE", app: "ReFile", bundle: "com.artursavytskyi.refile", left: true, top: true),
+    Corner(name: "SURF", app: "ReSurf", bundle: "com.artursavytskyi.resurf", left: false, top: true),
+    Corner(name: "DRAW", app: "ReDraw", bundle: "com.artursavytskyi.redraw", left: true, top: false),
+    Corner(name: "NOTE", app: "ReNote", bundle: "com.artursavytskyi.renote", left: false, top: false),
 ]
 
 /// Same rhythm as the apps' side buttons: 20pt letters, one every 32pt, upright.
@@ -1883,7 +1886,17 @@ final class WordView: DeskView {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
             let size = text.size()
             let y = bounds.maxY - CGFloat(i + 1) * letterStep + (letterStep - size.height) / 2
-            text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: y))
+            let at = NSPoint(x: (bounds.width - size.width) / 2, y: y)
+            if letter == "ー", let context = NSGraphicsContext.current?.cgContext {
+                // the long vowel mark, written down, stands as the word does (as the apps' vertical-rl)
+                context.saveGState()
+                context.translateBy(x: at.x + size.width / 2, y: at.y + size.height / 2)
+                context.rotate(by: -.pi / 2)
+                text.draw(at: NSPoint(x: -size.width / 2, y: -size.height / 2))
+                context.restoreGState()
+            } else {
+                text.draw(at: at)
+            }
         }
     }
 }
@@ -1991,7 +2004,7 @@ final class AppMenuBar: NSObject {
         }
     }
 
-    @objc private func redraw() {
+    @objc func redraw() {
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         for (corner, item) in items {
             let inFront = corner.bundle == front
@@ -4621,6 +4634,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(layout), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(layout), name: .wallpapersListed, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(languageChanged), name: Language.changed, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(tick), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -4681,6 +4695,13 @@ final class Desk: NSObject, NSApplicationDelegate {
         day.needsDisplay = true
         battery.level = batteryLevel()
         battery.needsDisplay = true
+    }
+
+    /// the corner words (and the apps across the top) in the other language: their columns as long as the new words
+    @objc private func languageChanged() {
+        layout()
+        windows.forEach { $0.contentView?.subviews.forEach { $0.needsDisplay = true }; $0.contentView?.needsDisplay = true }
+        AppMenuBar.shared.redraw()
     }
 
     @objc private func layout() {
@@ -4764,6 +4785,36 @@ if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < Co
     }
     render(SettingsPopup.shared, "settings\(suffix).png")
     render(KeysPopup.shared, "keys\(suffix).png")
+    // the corner words, side by side, on the dark
+    let columns = corners.map { corner -> NSView in
+        let view = WordView(corner: corner)
+        view.frame = NSRect(x: 0, y: 0, width: columnWidth, height: CGFloat(corner.word.count) * letterStep)
+        return view
+    }
+    let height = columns.map(\.frame.height).max() ?? 0
+    let board = NSView(frame: NSRect(x: 0, y: 0, width: CGFloat(columns.count) * (columnWidth + 20) + 20, height: height + 40))
+    for (i, view) in columns.enumerated() {
+        view.frame.origin = NSPoint(x: 20 + CGFloat(i) * (columnWidth + 20), y: 20 + height - view.frame.height)
+        board.addSubview(view)
+    }
+    do {
+        let back = NSImage(size: board.bounds.size)
+        back.lockFocus()
+        NSColor(white: 0.13, alpha: 1).setFill()
+        board.bounds.fill()
+        for view in columns {
+            NSGraphicsContext.current?.saveGraphicsState()
+            let shift = NSAffineTransform()
+            shift.translateX(by: view.frame.minX, yBy: view.frame.minY)
+            shift.concat()
+            view.draw(view.bounds)
+            NSGraphicsContext.current?.restoreGraphicsState()
+        }
+        back.unlockFocus()
+        if let tiff = back.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? png.write(to: folder.appendingPathComponent("words.png"))
+        }
+    }
     exit(0)
 }
 
