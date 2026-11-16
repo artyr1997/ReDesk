@@ -930,7 +930,7 @@ enum CommandKeys {
 // cut between it and its neighbour, which gives way as it goes; anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
-let tiledApps: Set<String> = Set(corners.map(\.bundle) + ["com.artursavytskyi.rebook", "com.artursavytskyi.redraw"])
+let tiledApps: Set<String> = Set(corners.map(\.bundle))
 /// between the windows: none while Flush (they make one window), else 10
 var tileGap: CGFloat { Tiler.shared.flush ? 0 : edgeGap }
 /// from the screen's edges in Almost Full
@@ -3636,7 +3636,7 @@ enum KnockAction: String, CaseIterable {
         }
     }
 
-    /// the Re apps (ReFile, ReSurf, RePlay, ReNote, ReBook) running on the desktop in sight
+    /// the Re apps (ReFile, ReSurf, ReDraw, ReNote) running on the desktop in sight
     private static func reApps() -> [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter {
             tiledApps.contains($0.bundleIdentifier ?? "") && Desktops.shared.desktop(of: $0) == Desktops.shared.current
