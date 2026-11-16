@@ -2260,7 +2260,11 @@ final class Desktops {
         let alive = Set(running.map(\.processIdentifier))
         away = away.filter { alive.contains($0.value.pid) }
         let seen = Set(here.map(\.id))
-        place = place.filter { seen.contains($0.key) || away[$0.key] != nil }
+        // a window out of sight only because another macOS space is in front is still on its desktop: the
+        // window server lists it (all spaces'); a closed one it doesn't
+        let exist = Set((CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [])
+            .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        place = place.filter { seen.contains($0.key) || away[$0.key] != nil || exist.contains($0.key) }
         for window in here {
             if place[window.id] == nil {
                 place[window.id] = current
@@ -2309,6 +2313,10 @@ final class Desktops {
         }
         workspace.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { _ in
             Tiler.log("macOS space changed")
+            // the desktops' dashes drawn again once the space's windows are in sight
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                NotificationCenter.default.post(name: .desktopsChanged, object: nil)
+            }
         }
         workspace.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.changed()
