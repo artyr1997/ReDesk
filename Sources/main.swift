@@ -2170,11 +2170,10 @@ final class AppMenuBar: NSObject {
 }
 
 /// The wallpapers as dots down the left edge; the one on the desktop is a diamond.
+/// The wallpapers as the desktops are shown: a dash each, one above another down the right edge, the one on
+/// the desk longer and stronger; a click on one sets it.
 final class WallpaperView: DeskView {
-    static let dot: CGFloat = 6
-
-    /// distance between dots, left to right
-    var spacing: CGFloat = 52
+    static let spacing: CGFloat = DesktopsView.spacing
 
     private var chosen = Wallpapers.current
 
@@ -2199,27 +2198,24 @@ final class WallpaperView: DeskView {
         needsDisplay = true
     }
 
-    private func centre(_ i: Int) -> NSPoint {
-        let first = bounds.midX - spacing * CGFloat(Wallpapers.all.count - 1) / 2
-        return NSPoint(x: first + spacing * CGFloat(i), y: bounds.midY)
+    /// the dashes around the middle of the view, the first wallpaper highest
+    private func centre(_ i: Int) -> CGFloat {
+        bounds.midY + (CGFloat(Wallpapers.all.count - 1) / 2 - CGFloat(i)) * Self.spacing
     }
 
     override func mouseDown(with event: NSEvent) {
-        let x = convert(event.locationInWindow, from: nil).x
-        let nearest = Wallpapers.all.indices.min { abs(centre($0).x - x) < abs(centre($1).x - x) }
-        if let nearest, abs(centre(nearest).x - x) <= spacing / 2 { Wallpapers.show(nearest) }
+        let y = convert(event.locationInWindow, from: nil).y
+        let nearest = Wallpapers.all.indices.min { abs(centre($0) - y) < abs(centre($1) - y) }
+        if let nearest, abs(centre(nearest) - y) <= Self.spacing / 2 { Wallpapers.show(nearest) }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         for i in Wallpapers.all.indices {
-            let c = centre(i)
-            if i == chosen {
-                drawDiamond(at: c)
-            } else {
-                let r = Self.dot / 2
-                faint.setFill()
-                NSBezierPath(ovalIn: NSRect(x: c.x - r, y: c.y - r, width: Self.dot, height: Self.dot)).fill()
-            }
+            let now = i == chosen
+            let width: CGFloat = now ? 20 : 10
+            (now ? strong : faint).setFill()
+            NSBezierPath(roundedRect: NSRect(x: bounds.midX - width / 2, y: centre(i) - 1, width: width, height: 2),
+                         xRadius: 1, yRadius: 1).fill()
         }
     }
 }
@@ -2570,9 +2566,18 @@ final class DesktopsView: DeskView {
 final class BatteryView: DeskView {
     var level = batteryLevel()
 
+    /// a line across the top, filled from both its ends toward the middle as far as charged
     override func draw(_ dirtyRect: NSRect) {
         guard let level else { return }
-        drawBar(in: NSRect(x: bounds.midX - barWidth / 2, y: 0, width: barWidth, height: bounds.height), filled: level, vertical: true)
+        let line = NSRect(x: 0, y: bounds.midY - barWidth / 2, width: bounds.width, height: barWidth)
+        let radius = barWidth / 2
+        faint.setFill()
+        NSBezierPath(roundedRect: line, xRadius: radius, yRadius: radius).fill()
+        let each = line.width / 2 * CGFloat(max(0, min(level, 1)))
+        guard each > 0 else { return }
+        strong.setFill()
+        NSBezierPath(roundedRect: NSRect(x: line.minX, y: line.minY, width: each, height: line.height), xRadius: radius, yRadius: radius).fill()
+        NSBezierPath(roundedRect: NSRect(x: line.maxX - each, y: line.minY, width: each, height: line.height), xRadius: radius, yRadius: radius).fill()
     }
 
     override func menuItems() -> [NSMenuItem] {
@@ -4780,20 +4785,20 @@ final class Desk: NSObject, NSApplicationDelegate {
             }
         }
         // the wallpapers across the top, where the day's line was (the day is out for now)
-        windows.append(DeskWindow(view: wallpapers) { [wallpapers] l in
-            let width = l.area.width * 0.24
-            let count = CGFloat(max(Wallpapers.all.count - 1, 1))
-            wallpapers.spacing = min(52, width / count)
-            return NSRect(x: l.area.midX - width / 2 - wallpapers.spacing / 2, y: l.dayLine - 9,
-                          width: width + wallpapers.spacing, height: 18)
+        // the wallpapers on the right edge, around its middle, as the desktops on the left
+        windows.append(DeskWindow(view: wallpapers) { l in
+            let height = WallpaperView.spacing * CGFloat(max(Wallpapers.all.count, 1) + 1)
+            return NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
         })
         // the desktops on the left edge, around its middle (room for eight)
         windows.append(DeskWindow(view: DesktopsView()) { l in
             let height = DesktopsView.spacing * 8
             return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
         })
+        // the battery across the top, where the wallpapers' dots were
         windows.append(DeskWindow(view: battery) { l in
-            NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - l.sideLength / 2, width: columnWidth, height: l.sideLength)
+            let width = l.area.width * 0.24
+            return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 9, width: width, height: 18)
         })
         // the day line's twin at the bottom, between PLAY and NOTE; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
