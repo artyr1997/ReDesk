@@ -944,7 +944,8 @@ enum WindowJoins {
     static let name = Notification.Name("com.artursavytskyi.re.corners")
 
     /// `pinned`: the windows pinned to their places (⌃⌥P), which write P in their top left corner.
-    static func tell(_ windows: [(element: AXUIElement, frame: NSRect)], separate: Bool, pinned: [AXUIElement] = []) {
+    /// `shared`: ReDesk lays one glass under them all (GlassBackdrop): each window drops its own.
+    static func tell(_ windows: [(element: AXUIElement, frame: NSRect)], separate: Bool, pinned: [AXUIElement] = [], shared: Bool = false) {
         guard let top = NSScreen.screens.first?.frame.maxY else { return }
         for (i, (element, r)) in windows.enumerated() {
             var pid: pid_t = 0
@@ -971,7 +972,7 @@ enum WindowJoins {
             }
             // the window's place as the apps see it: from the top left of the main screen, in points
             let pin = pinned.contains { CFEqual($0, element) } ? 1 : 0
-            let info: [String: Any] = ["pid": Int(pid), "corners": corners, "edges": edges, "pinned": pin,
+            let info: [String: Any] = ["pid": Int(pid), "corners": corners, "edges": edges, "pinned": pin, "shared": shared ? 1 : 0,
                                        "x": Double(r.minX), "y": Double(top - r.maxY), "w": Double(r.width), "h": Double(r.height)]
             DistributedNotificationCenter.default().postNotificationName(name, object: nil, userInfo: info, deliverImmediately: true)
         }
@@ -1129,6 +1130,54 @@ func setFrame(of window: AXUIElement, to r: NSRect, size resize: Bool = true, ex
 }
 
 /// The place a dragged window would go: a soft frame over it, above the windows.
+/// Glass windows joined (Flush): one glass under them all, so they are one, with no seams where they meet
+/// (each window's own blur ends at its edges). A window just under the others (the normal level less one),
+/// the system's dark blur of what is behind, rounded as the windows are; clicks go through.
+final class GlassBackdrop {
+    static let shared = GlassBackdrop()
+    private let window = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+    private(set) var shown = false
+
+    init() {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.normalWindow)) - 1)
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        let glass = NSVisualEffectView()
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.appearance = NSAppearance(named: .darkAqua)
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = 12
+        glass.layer?.masksToBounds = true
+        window.contentView = glass
+    }
+
+    /// Under `r`, gliding there as the windows do (`duration`).
+    func show(_ r: NSRect, duration: Double) {
+        if !shown || duration == 0 || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            window.setFrame(r, display: true)
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = duration
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 1, 0.5, 1)
+                window.animator().setFrame(r, display: true)
+            }
+        }
+        if !shown { window.orderFront(nil) }
+        shown = true
+    }
+
+    func hide() {
+        guard shown else { return }
+        window.orderOut(nil)
+        shown = false
+    }
+}
+
 final class DropOverlay {
     private final class Outline: NSView {
         override func draw(_ dirtyRect: NSRect) {
@@ -1310,6 +1359,7 @@ final class Tiler {
         timer?.invalidate()
         timer = nil
         overlay.hide()
+        GlassBackdrop.shared.hide()
         // no longer tiled: every window round again
         WindowJoins.tell(order.compactMap { w in frame(of: w.element).map { (w.element, $0) } }, separate: true)
     }
@@ -1598,13 +1648,21 @@ final class Tiler {
         return changed
     }
 
+    /// Glass windows joined as one (Flush, side by side): one glass under them all (GlassBackdrop)
+    private var sharedGlass: Bool { on && Glass.on && flush && !arrangement.stacks && order.count > 1 }
+
     func retile() {
         guard on, AXIsProcessTrusted() else { return }
         remember()
         slots = places()
+        if sharedGlass, let first = slots.first {
+            GlassBackdrop.shared.show(slots.dropFirst().reduce(first) { $0.union($1) }, duration: 0.32)
+        } else {
+            GlassBackdrop.shared.hide()
+        }
         // each app told which of its corners to round (all, but while Flush); stacked, each window is alone
         WindowJoins.tell(zip(order, slots).map { ($0.element, $1) }, separate: !flush || arrangement.stacks,
-                         pinned: pinned.keys.map(\.element))
+                         pinned: pinned.keys.map(\.element), shared: sharedGlass)
         let moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
@@ -1622,7 +1680,7 @@ final class Tiler {
             }
             // again where they now are: an app takes the word only for the place its window is in
             WindowJoins.tell(moves.map { ($0.window.element, $0.to) }, separate: !self.flush || self.arrangement.stacks,
-                             pinned: self.pinned.keys.map(\.element))
+                             pinned: self.pinned.keys.map(\.element), shared: self.sharedGlass)
         }
         let still = moves.allSatisfy { $0.from.integral == $0.to }
         guard !still, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return finish() }
@@ -1759,6 +1817,8 @@ enum Glass {
             UserDefaults.standard.set(newValue, forKey: "glass")
             DistributedNotificationCenter.default().postNotificationName(
                 Notification.Name("com.artursavytskyi.re.glass"), object: newValue ? "1" : "0", userInfo: nil, deliverImmediately: true)
+            // joined windows: one glass under them, or none
+            Tiler.shared.retile()
         }
     }
 }
