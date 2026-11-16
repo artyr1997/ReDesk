@@ -9,7 +9,12 @@ enum Language: String, CaseIterable {
 
     static var current: Language {
         get { Language(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .english }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: key)
+            // the Re apps write their buttons in it too
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.artursavytskyi.re.language"), object: newValue.rawValue, userInfo: nil, deliverImmediately: true)
+        }
     }
 
     static var isJapanese: Bool { current == .japanese }
