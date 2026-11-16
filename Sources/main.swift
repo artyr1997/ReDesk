@@ -1132,7 +1132,7 @@ func setFrame(of window: AXUIElement, to r: NSRect, size resize: Bool = true, ex
 /// The place a dragged window would go: a soft frame over it, above the windows.
 /// Glass windows joined (Flush): one glass under them all, so they are one, with no seams where they meet
 /// (each window's own blur ends at its edges). A window just under the others (the normal level less one),
-/// the system's dark blur of what is behind, rounded as the windows are; clicks go through.
+/// the system's dark blur of what is behind, square as the windows on glass are; clicks go through.
 final class GlassBackdrop {
     static let shared = GlassBackdrop()
     private let window = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -1151,8 +1151,7 @@ final class GlassBackdrop {
         glass.state = .active
         glass.appearance = NSAppearance(named: .darkAqua)
         glass.wantsLayer = true
-        glass.layer?.cornerRadius = 12
-        glass.layer?.masksToBounds = true
+        // square, as the windows on glass are
         window.contentView = glass
     }
 
