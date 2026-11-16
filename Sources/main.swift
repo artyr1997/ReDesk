@@ -1,7 +1,7 @@
 // ReDesk: the Re apps and a few quiet gauges on the desktop.
 // Corners: the apps as words (a click opens one). Top: the wallpapers, pictures and videos, as dots in a row
 // (wallpapers/Light or wallpapers/Dark, as the Mac's appearance is). Left edge: ReDesk's own desktops.
-// Right edge: the battery. Bottom: a wave while sound plays. (The day's line is out for now.)
+// Bottom: a wave while sound plays. (The day's line is out for now.)
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Knocks: two to five knocks on the MacBook, each an action.
 // Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
@@ -4750,7 +4750,6 @@ final class Desk: NSObject, NSApplicationDelegate {
 
     private let wallpapers = WallpaperView()
     private let day = DayView()
-    private let battery = BatteryView()
     private let wave = WaveView()
     private var windows: [DeskWindow] = []
     private let strip = AppStripView()
@@ -4794,11 +4793,6 @@ final class Desk: NSObject, NSApplicationDelegate {
             let height = DesktopsView.spacing * 8
             return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
         })
-        // the battery across the top, where the wallpapers' dots were
-        windows.append(DeskWindow(view: battery) { l in
-            let width = l.area.width * 0.24
-            return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 9, width: width, height: 18)
-        })
         // the day line's twin at the bottom, between PLAY and NOTE; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
             let width = l.area.width * 0.24
@@ -4816,7 +4810,7 @@ final class Desk: NSObject, NSApplicationDelegate {
             self, selector: #selector(tick), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
             wallpapers, selector: #selector(WallpaperView.changedElsewhere), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
-        // a minute of the day is a few pixels at most; the battery moves slower still
+        // a minute of the day is a few pixels at most
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
         HotKeys.register()
         LockScreen.shared.start()
@@ -4870,8 +4864,6 @@ final class Desk: NSObject, NSApplicationDelegate {
 
     @objc private func tick() {
         day.needsDisplay = true
-        battery.level = batteryLevel()
-        battery.needsDisplay = true
     }
 
     /// the corner words (and the apps across the top) in the other language: their columns as long as the new words
@@ -4891,7 +4883,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         showBar()
     }
 
-    /// The desk's own pieces (the corner words, the dots, the day line, the battery, the wave): gone in
+    /// The desk's own pieces (the corner words, the dots, the day line, the wave): gone in
     /// Almost Full, where only the apps across the top stay; they fade out and back.
     private func showPieces(animated: Bool = true) {
         let hidden = Tiler.shared.on && Tiler.shared.almostFull
