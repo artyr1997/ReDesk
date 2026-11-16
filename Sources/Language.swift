@@ -55,6 +55,7 @@ private let japaneseWords: [String: String] = [
     "Flush": "隙間なし",
     "Ink cursors": "墨のカーソル",
     "Dark appearance": "ダークモード",
+    "Glass windows": "ガラスの窓",
     "Open at login": "ログイン時に開く",
     "Wallpaper": "壁紙",
     "Wallpaper from YouTube": "YouTubeの壁紙",

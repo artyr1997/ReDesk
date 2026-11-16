@@ -1750,6 +1750,19 @@ final class Tiler {
 // ── the Mac's appearance and cursors ──
 
 /// ⌘⇧T: the Mac between light and dark. System Events does it, so macOS asks once whether ReDesk may.
+/// Glass windows (an experiment): the Re apps' windows as the system's blur of what is behind them, written
+/// in the desk's white ink. Kept, and told to the apps (they read it at start too).
+enum Glass {
+    static var on: Bool {
+        get { UserDefaults.standard.bool(forKey: "glass") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "glass")
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.artursavytskyi.re.glass"), object: newValue ? "1" : "0", userInfo: nil, deliverImmediately: true)
+        }
+    }
+}
+
 enum Appearance {
     static func toggle() {
         let script = NSAppleScript(source: """
@@ -4507,6 +4520,7 @@ final class SettingsPopup: Popup {
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
+            toggleRow("Glass windows", Glass.on) { Glass.on = $0 },
             toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {
                     SMAppService.openSystemSettingsLoginItems()
