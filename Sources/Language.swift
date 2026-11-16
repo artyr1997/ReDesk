@@ -204,6 +204,8 @@ private let japaneseWords: [String: String] = [
     "line": "線の太さ",
     "undo / redo": "取り消す / やり直す",
     "clear": "消去",
+    "nearer / further": "拡大 / 縮小",
+    "as it was": "元の大きさ",
     "save a PNG": "PNGで保存",
     "select a note": "ノートを選ぶ",
     "another space": "別のスペース",

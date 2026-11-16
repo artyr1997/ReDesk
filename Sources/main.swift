@@ -4617,7 +4617,7 @@ final class KeysPopup: Popup {
         ]),
         ("Re:Draw", [
             (nil, [("⌘N", "new window"), ("B / K / E", "pen / brush / rubber"), ("T", "the trackpad as a tablet"), ("1 – 4  [ ]", "line"),
-                   ("⌘Z / ⇧⌘Z", "undo / redo"), ("Backspace", "clear"), ("⌘S", "save a PNG"), ("I", "info")]),
+                   ("⌘Z / ⇧⌘Z", "undo / redo"), ("⌘+ / ⌘−  pinch", "nearer / further"), ("⌘0", "as it was"), ("Backspace", "clear"), ("⌘S", "save a PNG"), ("I", "info")]),
         ]),
         ("Re:Note", [
             ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
