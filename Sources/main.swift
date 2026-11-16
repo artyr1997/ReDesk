@@ -4367,14 +4367,19 @@ final class Do: NSObject {
 
 /// Settings: everything the right-click menu had, in one place.
 final class SettingsPopup: Popup {
-    static let shared = SettingsPopup(width: 560)
+    static let shared = SettingsPopup(width: 1080)
+
+    override func width(on screen: NSRect) -> CGFloat { min(1080, screen.width - 80) }
 
     override func build() -> NSView {
-        var views: [NSView] = [heading("Re:Desk")]
-        func section(_ name: String, _ rows: [NSView]) {
-            views.append(divider())
+        // two columns: the desk and its wallpaper on the left, the screen and the knocks on the right
+        var left: [NSView] = [], right: [NSView] = []
+        func section(_ name: String, _ rows: [NSView], right isRight: Bool = false) {
+            var views = isRight ? right : left
+            if !views.isEmpty { views.append(divider()) }
             views.append(caption(name))
             views.append(contentsOf: rows)
+            if isRight { right = views } else { left = views }
         }
 
         var desk: [NSView] = [toggleRow("Tile windows", Tiler.shared.on, note: "⌃⌥T") { Tiler.shared.on = $0 }]
@@ -4432,7 +4437,7 @@ final class SettingsPopup: Popup {
         if LidLight.shared.available {
             screen.append(toggleRow("Brightness by lid", LidLight.shared.on) { LidLight.shared.on = $0 })
         }
-        section("Screen", screen)
+        section("Screen", screen, right: true)
 
         if Knocks.shared.available {
             var taps: [NSView] = []
@@ -4446,16 +4451,22 @@ final class SettingsPopup: Popup {
                 }
                 taps.append(choiceRow("Sensitivity", Knocks.sensitivities, Knocks.shared.sensitivity, indent: 18) { Knocks.shared.sensitivity = $0 })
             }
-            section("Knocks", taps)
+            section("Knocks", taps, right: true)
         }
 
-        views.append(divider())
+        let columns = NSStackView(views: [column(left, spacing: 12), column(right, spacing: 12)])
+        columns.orientation = .horizontal
+        columns.alignment = .top
+        columns.distribution = .fillEqually
+        columns.spacing = 56
         let footer = NSStackView(views: [words("⌃⌥, settings  ·  ⌃⌥/ keys", size: 13, alpha: 0.4), NSView(), button("Quit") { _ in NSApp.terminate(nil) }])
         footer.orientation = .horizontal
         footer.alignment = .centerY
-        views.append(footer)
+        let views: [NSView] = [heading("Re:Desk"), divider(), columns, divider(), footer]
         let stack = column(views, spacing: 12)
         stack.setCustomSpacing(26, after: views[0])
+        stack.setCustomSpacing(20, after: views[1])
+        stack.setCustomSpacing(20, after: views[2])
         return stack
     }
 }
