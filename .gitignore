@@ -3,3 +3,5 @@ build/
 # wallpapers live on disk only: videos of 100 MB and more are too big for git (build.sh still copies them)
 wallpapers/Light/
 wallpapers/Dark/
+katsumi-regular-*/
+Resources/Katsumi.ttf

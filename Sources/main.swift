@@ -2525,6 +2525,30 @@ final class Desktops {
 
 /// The desktops on the left edge, around its middle: a dash each, top to bottom, the one in sight longer and
 /// stronger. A click goes to one.
+// ── the day of the week, large across the middle of the desk ──
+
+/// Today's name in Katsumi, in see-through capitals across the middle of the screen (always in English:
+/// the font has only Latin letters); only to look at, clicks go through to the desktop.
+final class WeekdayView: NSView {
+    private static let font: (CGFloat) -> NSFont = { size in
+        if let url = Bundle.main.url(forResource: "Katsumi", withExtension: "ttf") {
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+        return NSFont(name: "KATSUMI-Regular", size: size) ?? .systemFont(ofSize: size, weight: .ultraLight)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEEE"
+        let name = formatter.string(from: Date()).uppercased() as NSString
+        // the same size every day: WEDNESDAY, the longest, takes about half the width
+        let attributes: [NSAttributedString.Key: Any] = [.font: Self.font(bounds.width / 12.5), .foregroundColor: ink(0.2)]
+        let size = name.size(withAttributes: attributes)
+        name.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: attributes)
+    }
+}
+
 final class DesktopsView: DeskView {
     static let spacing: CGFloat = 16
 
@@ -4752,6 +4776,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let day = DayView()
     private let battery = BatteryView()
     private let wave = WaveView()
+    private let weekday = WeekdayView()
     private var windows: [DeskWindow] = []
     private let strip = AppStripView()
     /// placed by showStrip(), over the strip the hidden menu bar leaves at the top of the screen
@@ -4806,6 +4831,10 @@ final class Desk: NSObject, NSApplicationDelegate {
         }
         waveWindow.ignoresMouseEvents = true
         windows.append(waveWindow)
+        // the day of the week across the middle; only to look at, clicks go through
+        let weekdayWindow = DeskWindow(view: weekday) { l in l.area }
+        weekdayWindow.ignoresMouseEvents = true
+        windows.insert(weekdayWindow, at: 0)
 
         layout()
         NotificationCenter.default.addObserver(
@@ -4870,6 +4899,7 @@ final class Desk: NSObject, NSApplicationDelegate {
 
     @objc private func tick() {
         day.needsDisplay = true
+        weekday.needsDisplay = true
         battery.level = batteryLevel()
         battery.needsDisplay = true
     }
@@ -4897,7 +4927,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         let hidden = Tiler.shared.on && Tiler.shared.almostFull
         for window in windows {
             let alpha: CGFloat = hidden ? 0 : 1
-            window.ignoresMouseEvents = hidden || window.contentView === wave
+            window.ignoresMouseEvents = hidden || window.contentView === wave || window.contentView === weekday
             guard window.alphaValue != alpha else { continue }
             if animated {
                 NSAnimationContext.runAnimationGroup { $0.duration = 0.25; window.animator().alphaValue = alpha }
