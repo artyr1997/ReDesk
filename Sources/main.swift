@@ -41,6 +41,10 @@ let corners = [
     Corner(name: "NOTE", app: "ReNote", bundle: "com.artursavytskyi.renote", left: false, top: false),
 ]
 
+/// ReTerm: a Re app as the others (its windows tiled, pinned, faded…), but without a word on the desk;
+/// T opens it, as F / S / D / N the others
+let terminal = Corner(name: "TERM", app: "ReTerm", bundle: "com.artursavytskyi.reterm", left: false, top: false)
+
 /// Same rhythm as the apps' side buttons: 20pt letters, one every 32pt, upright.
 let letterSize: CGFloat = 20
 let letterStep: CGFloat = 32
@@ -867,8 +871,8 @@ enum CommandKeys {
 
     private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
 
-    /// F, S, H, N with the desk in front: the app of that letter's corner
-    private static let letters = [kVK_ANSI_F: 0, kVK_ANSI_S: 1, kVK_ANSI_D: 2, kVK_ANSI_N: 3]
+    /// F, S, D, N with the desk in front: the app of that letter's corner; T: ReTerm
+    private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_D: corners[2], kVK_ANSI_N: corners[3], kVK_ANSI_T: terminal]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
     /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
@@ -904,7 +908,7 @@ enum CommandKeys {
         let flags = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
         if flags.isEmpty, let corner = letters[Int(event.getIntegerValueField(.keyboardEventKeycode))],
            event.getIntegerValueField(.keyboardEventAutorepeat) == 0, deskInFront() {
-            return { ReDesk.open(corners[corner]) }
+            return { ReDesk.open(corner) }
         }
         guard flags.contains(.maskCommand),
               tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") else { return nil }
@@ -933,7 +937,7 @@ enum CommandKeys {
 // cut between it and its neighbour, which gives way as it goes; anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
-let tiledApps: Set<String> = Set(corners.map(\.bundle))
+let tiledApps: Set<String> = Set((corners + [terminal]).map(\.bundle))
 /// between the windows: none while Flush (they make one window), else 10
 var tileGap: CGFloat { Tiler.shared.flush ? 0 : edgeGap }
 /// from the screen's edges in Almost Full
@@ -3657,7 +3661,7 @@ final class LidLight {
 
 /// What a number of knocks does.
 enum KnockAction: String, CaseIterable {
-    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, blurWallpaper, file, surf, hear, note
+    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, blurWallpaper, file, surf, hear, note, term
 
     var title: String {
         switch self {
@@ -3675,6 +3679,7 @@ enum KnockAction: String, CaseIterable {
         case .surf: return "Open ReSurf"
         case .hear: return "Open ReDraw"
         case .note: return "Open ReNote"
+        case .term: return "Open ReTerm"
         }
     }
 
@@ -3712,10 +3717,11 @@ enum KnockAction: String, CaseIterable {
         case .surf: ReDesk.open(corners[1])
         case .hear: ReDesk.open(corners[2])
         case .note: ReDesk.open(corners[3])
+        case .term: ReDesk.open(terminal)
         }
     }
 
-    /// the Re apps (ReFile, ReSurf, ReDraw, ReNote) running on the desktop in sight
+    /// the Re apps (ReFile, ReSurf, ReDraw, ReNote, ReTerm) running on the desktop in sight
     private static func reApps() -> [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter {
             tiledApps.contains($0.bundleIdentifier ?? "") && Desktops.shared.desktop(of: $0) == Desktops.shared.current
@@ -4684,7 +4690,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
-            ("On the desk", [("F / S / D / N", "ReFile / ReSurf / ReDraw / ReNote")]),
+            ("On the desk", [("F / S / D / N / T", "ReFile / ReSurf / ReDraw / ReNote / ReTerm")]),
             ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),

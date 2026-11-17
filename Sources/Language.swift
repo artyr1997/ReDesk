@@ -119,6 +119,7 @@ private let japaneseWords: [String: String] = [
     "Open ReSurf": "ReSurfを開く",
     "Open ReDraw": "ReDrawを開く",
     "Open ReNote": "ReNoteを開く",
+    "Open ReTerm": "ReTermを開く",
 
     // ── a wallpaper from YouTube ──
     "Paste a link: the video plays from YouTube in its best quality, without sound.":
@@ -159,7 +160,7 @@ private let japaneseWords: [String: String] = [
     "next arrangement": "次の配置",
     "the window becomes the main one": "このウィンドウをメインに",
     "pin the window to its place": "ウィンドウをその場に固定",
-    "ReFile / ReSurf / ReDraw / ReNote": "ReFile / ReSurf / ReDraw / ReNote",
+    "ReFile / ReSurf / ReDraw / ReNote / ReTerm": "ReFile / ReSurf / ReDraw / ReNote / ReTerm",
     "the desktop above / below": "上 / 下のデスクトップ",
     "take the window there": "ウィンドウを連れて行く",
     "an arrangement": "配置を選ぶ",
