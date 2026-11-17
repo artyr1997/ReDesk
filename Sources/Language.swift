@@ -132,6 +132,7 @@ private let japaneseWords: [String: String] = [
 
     // ── the lock screen ──
     "UNLOCK": "解除",
+    "MEMENTO MORI": "死を忘れるな",
 
     // ── keys ──
     "⌃⌥/ or Esc closes  ·  ⌃⌥, settings": "⌃⌥/ か Esc で閉じる  ·  ⌃⌥, 設定",

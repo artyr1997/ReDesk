@@ -3316,7 +3316,7 @@ final class LockFace: NSView {
         drawBar(in: NSRect(x: line.minX, y: line.midY - barWidth / 2, width: line.width, height: barWidth), filled: gone, vertical: false)
         strong.setFill()
         NSRect(x: line.midX - 0.75, y: line.minY, width: 1.5, height: line.height).fill()
-        let title = NSAttributedString(string: "MEMENTO MORI", attributes: [
+        let title = NSAttributedString(string: tr("MEMENTO MORI"), attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
         let t = title.size()
