@@ -27,7 +27,7 @@ struct Corner {
     /// its word in English: FILE, SURF…
     let name: String
     /// its word on the desk, in the desk's language
-    var word: String { tr(name) }
+    var word: String { Flap.text(tr(name), seed: name) }
     let app: String
     let bundle: String
     let left: Bool
@@ -4872,7 +4872,14 @@ final class Desk: NSObject, NSApplicationDelegate {
     /// the corner words (and the apps across the top) in the other language: their columns as long as the new words
     @objc private func languageChanged() {
         layout()
+        redrawWords()
+        // the letters turn over one after another, as on a departures board
+        Flap.start { [weak self] in self?.redrawWords() }
+    }
+
+    private func redrawWords() {
         windows.forEach { $0.contentView?.subviews.forEach { $0.needsDisplay = true }; $0.contentView?.needsDisplay = true }
+        stripWindow.contentView?.needsDisplay = true
         AppMenuBar.shared.redraw()
     }
 

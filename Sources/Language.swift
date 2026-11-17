@@ -227,3 +227,37 @@ private let japaneseWords: [String: String] = [
     "undo": "取り消す",
     "redo": "やり直す",
 ]
+
+/// The language turning, as on a departures board: each letter runs through others (Latin and katakana)
+/// before it stops at its new one, the first soonest, the next a little later.
+enum Flap {
+    private static let pool = Array("アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+    static let step = 0.055, settle = 0.26, stagger = 0.11, length = 1.2
+    private static var started: Date?
+    private static var timer: Timer?
+
+    static func start(redraw: @escaping () -> Void) {
+        started = Date()
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: step, repeats: true) { timer in
+            if let started, Date().timeIntervalSince(started) > length {
+                Flap.started = nil
+                timer.invalidate()
+            }
+            redraw()
+        }
+    }
+
+    /// the word as it shows now: itself, or partly still turning
+    static func text(_ word: String, seed: String) -> String {
+        guard let started else { return word }
+        let elapsed = Date().timeIntervalSince(started)
+        let frame = Int(elapsed / step)
+        return String(word.enumerated().map { i, letter in
+            if letter == " " || elapsed >= settle + Double(i) * stagger { return letter }
+            var hash = frame &* 31 &+ i &* 17
+            for unit in seed.unicodeScalars { hash = hash &* 33 &+ Int(unit.value) }
+            return pool[abs(hash % pool.count)]
+        })
+    }
+}
