@@ -63,6 +63,7 @@ private let japaneseWords: [String: String] = [
     "Ink cursors": "墨のカーソル",
     "Dark appearance": "ダークモード",
     "Glass windows": "ガラスの窓",
+    "Plus marks": "角に十字",
     "Open at login": "ログイン時に開く",
     "Wallpaper": "壁紙",
     "Wallpaper from YouTube": "YouTubeの壁紙",
