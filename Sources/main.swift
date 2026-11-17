@@ -37,13 +37,13 @@ struct Corner {
 let corners = [
     Corner(name: "FILE", app: "ReFile", bundle: "com.artursavytskyi.refile", left: true, top: true),
     Corner(name: "SURF", app: "ReSurf", bundle: "com.artursavytskyi.resurf", left: false, top: true),
-    Corner(name: "DRAW", app: "ReDraw", bundle: "com.artursavytskyi.redraw", left: true, top: false),
+    Corner(name: "TERM", app: "ReTerm", bundle: "com.artursavytskyi.reterm", left: true, top: false),
     Corner(name: "NOTE", app: "ReNote", bundle: "com.artursavytskyi.renote", left: false, top: false),
 ]
 
-/// ReTerm: a Re app as the others (its windows tiled, pinned, faded…), but without a word on the desk;
-/// T opens it, as F / S / D / N the others
-let terminal = Corner(name: "TERM", app: "ReTerm", bundle: "com.artursavytskyi.reterm", left: false, top: false)
+/// ReDraw: a Re app as the others (its windows tiled, pinned, faded…), but without a word on the desk
+/// (TERM has its corner); D opens it, as F / S / T / N the others
+let drawing = Corner(name: "DRAW", app: "ReDraw", bundle: "com.artursavytskyi.redraw", left: true, top: false)
 
 /// Same rhythm as the apps' side buttons: 20pt letters, one every 32pt, upright.
 let letterSize: CGFloat = 20
@@ -872,7 +872,7 @@ enum CommandKeys {
     private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
 
     /// F, S, D, N with the desk in front: the app of that letter's corner; T: ReTerm
-    private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_D: corners[2], kVK_ANSI_N: corners[3], kVK_ANSI_T: terminal]
+    private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_T: corners[2], kVK_ANSI_N: corners[3], kVK_ANSI_D: drawing]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
     /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
@@ -937,7 +937,7 @@ enum CommandKeys {
 // cut between it and its neighbour, which gives way as it goes; anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
-let tiledApps: Set<String> = Set((corners + [terminal]).map(\.bundle))
+let tiledApps: Set<String> = Set((corners + [drawing]).map(\.bundle))
 /// between the windows: none while Flush (they make one window), else 10
 var tileGap: CGFloat { Tiler.shared.flush ? 0 : edgeGap }
 /// from the screen's edges in Almost Full
@@ -3715,9 +3715,9 @@ enum KnockAction: String, CaseIterable {
         case .blurWallpaper: WallpaperBlur.on.toggle()
         case .file: ReDesk.open(corners[0])
         case .surf: ReDesk.open(corners[1])
-        case .hear: ReDesk.open(corners[2])
+        case .hear: ReDesk.open(drawing)
         case .note: ReDesk.open(corners[3])
-        case .term: ReDesk.open(terminal)
+        case .term: ReDesk.open(corners[2])
         }
     }
 
@@ -4690,7 +4690,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
-            ("On the desk", [("F / S / D / N / T", "ReFile / ReSurf / ReDraw / ReNote / ReTerm")]),
+            ("On the desk", [("F / S / T / N / D", "ReFile / ReSurf / ReTerm / ReNote / ReDraw")]),
             ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),

@@ -47,6 +47,7 @@ private let japaneseWords: [String: String] = [
     // ── the corner words: four characters, as FILE, SURF… ──
     "FILE": "ファイル",
     "SURF": "ブラウザ",
+    "TERM": "端末画面",
     "DRAW": "お絵描き",
     "NOTE": "覚え書き",
 
@@ -160,7 +161,7 @@ private let japaneseWords: [String: String] = [
     "next arrangement": "次の配置",
     "the window becomes the main one": "このウィンドウをメインに",
     "pin the window to its place": "ウィンドウをその場に固定",
-    "ReFile / ReSurf / ReDraw / ReNote / ReTerm": "ReFile / ReSurf / ReDraw / ReNote / ReTerm",
+    "ReFile / ReSurf / ReTerm / ReNote / ReDraw": "ReFile / ReSurf / ReTerm / ReNote / ReDraw",
     "the desktop above / below": "上 / 下のデスクトップ",
     "take the window there": "ウィンドウを連れて行く",
     "an arrangement": "配置を選ぶ",
