@@ -4308,9 +4308,10 @@ final class Snap {
 /// Light or dark as the Mac is. Esc, the same keys again, or a click beside it closes it.
 class Popup: NSPanel {
     /// the paper's colours, as the apps' --bg, --text and --line
-    static var paper: NSColor { Appearance.dark ? NSColor(white: 0x1d / 255.0, alpha: 1) : NSColor(white: 0xF4 / 255.0, alpha: 1) }
-    static var text: NSColor { Appearance.dark ? NSColor(white: 0x80 / 255.0, alpha: 1) : NSColor(white: 0x47 / 255.0, alpha: 1) }
-    static var line: NSColor { Appearance.dark ? NSColor(white: 0x74 / 255.0, alpha: 1) : NSColor(red: 0x57 / 255.0, green: 0x58 / 255.0, blue: 0x5A / 255.0, alpha: 1) }
+    /// on glass: a darker frosted pane, the words in the desk's white, as the apps' popups then
+    static var paper: NSColor { Glass.on ? NSColor(white: 0, alpha: 0.32) : Appearance.dark ? NSColor(white: 0x1d / 255.0, alpha: 1) : NSColor(white: 0xF4 / 255.0, alpha: 1) }
+    static var text: NSColor { Glass.on ? NSColor(white: 1, alpha: 0.8) : Appearance.dark ? NSColor(white: 0x80 / 255.0, alpha: 1) : NSColor(white: 0x47 / 255.0, alpha: 1) }
+    static var line: NSColor { Glass.on ? NSColor(white: 1, alpha: 0.5) : Appearance.dark ? NSColor(white: 0x74 / 255.0, alpha: 1) : NSColor(red: 0x57 / 255.0, green: 0x58 / 255.0, blue: 0x5A / 255.0, alpha: 1) }
 
     static let fonts: Void = {
         for name in ["Kurale"] {
@@ -4318,10 +4319,17 @@ class Popup: NSPanel {
                 CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
             }
         }
+        if let url = Bundle.main.url(forResource: "MPLUS1p", withExtension: "ttf") {
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
         _ = letterFont
     }()
     static func noto(_ size: CGFloat) -> NSFont { _ = fonts; return NSFont(name: "NotoSansJP-Regular", size: size) ?? .systemFont(ofSize: size, weight: .light) }
-    static func kurale(_ size: CGFloat) -> NSFont { _ = fonts; return NSFont(name: "Kurale-Regular", size: size) ?? NSFont(name: "Kurale", size: size) ?? .systemFont(ofSize: size) }
+    /// the words' font: Kurale, or M PLUS 1p on glass (as the apps' text then)
+    static func kurale(_ size: CGFloat) -> NSFont {
+        _ = fonts
+        if Glass.on, let font = NSFont(name: "MPLUS1p-Regular", size: size) { return font }
+        return NSFont(name: "Kurale-Regular", size: size) ?? NSFont(name: "Kurale", size: size) ?? .systemFont(ofSize: size) }
     static let grain = Bundle.main.image(forResource: "noise")
 
     private let paperView = PaperView()
@@ -4372,7 +4380,7 @@ class Popup: NSPanel {
         refresh()
         if let screen = NSScreen.main {
             veil.setFrame(screen.frame, display: true)
-            veil.appearance = NSAppearance(named: Appearance.dark ? .darkAqua : .aqua)
+            veil.appearance = NSAppearance(named: Appearance.dark || Glass.on ? .darkAqua : .aqua)
             veil.orderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -4382,7 +4390,7 @@ class Popup: NSPanel {
     func refresh() {
         actions = []
         // the lists a choice opens, light or dark with the paper
-        appearance = NSAppearance(named: Appearance.dark ? .darkAqua : .aqua)
+        appearance = NSAppearance(named: Appearance.dark || Glass.on ? .darkAqua : .aqua)
         veil.appearance = appearance
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let width = width(on: screen)
@@ -4420,7 +4428,7 @@ class Popup: NSPanel {
     func words(_ words: String, size: CGFloat = 14, alpha: CGFloat = 1) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: tr(words))
         // Kurale has no kana or kanji: in Japanese, Noto Sans JP, a little smaller
-        field.font = Language.isJapanese ? Self.noto(size - 1) : Self.kurale(size)
+        field.font = Language.isJapanese && !Glass.on ? Self.noto(size - 1) : Self.kurale(size)
         field.textColor = Self.text.withAlphaComponent(alpha)
         field.isSelectable = false
         return field
@@ -4531,14 +4539,14 @@ final class PaperView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         Popup.paper.setFill()
         bounds.fill()
-        if let grain = Popup.grain {
+        if !Glass.on, let grain = Popup.grain {
             // as the apps: at night the grain is multiplied into the paper (background-blend-mode: multiply)
             NSColor(patternImage: grain).setFill()
             bounds.fill(using: Appearance.dark ? .multiply : .sourceOver)
         }
         Popup.line.setStroke()
-        let edge = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
-        edge.lineWidth = 2
+        let edge = NSBezierPath(rect: bounds.insetBy(dx: Glass.on ? 0.5 : 1, dy: Glass.on ? 0.5 : 1))
+        edge.lineWidth = Glass.on ? 1 : 2
         edge.stroke()
     }
 }
