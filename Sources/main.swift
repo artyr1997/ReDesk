@@ -806,6 +806,7 @@ enum HotKeys {
             case 33: LockScreen.shared.show()
             case 34: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
             case 35: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
+            case 36: Language.toggle()
             case 51: Desktops.shared.step(-1)
             case 52: Desktops.shared.step(1)
             case 53: Desktops.shared.take(-1)
@@ -820,6 +821,8 @@ enum HotKeys {
             + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey)),
                (UInt32(33), kVK_ANSI_L, UInt32(cmdKey | controlKey)),
                (UInt32(34), kVK_ANSI_Comma, modifiers), (UInt32(35), kVK_ANSI_Slash, modifiers),
+               // ⌃⌥J: English / 日本語
+               (UInt32(36), kVK_ANSI_J, modifiers),
                // ⌥⌘↑ / ↓: the desktop above / below; with ⇧ the window in front goes along
                (UInt32(51), kVK_UpArrow, UInt32(optionKey | cmdKey)), (UInt32(52), kVK_DownArrow, UInt32(optionKey | cmdKey)),
                (UInt32(53), kVK_UpArrow, UInt32(optionKey | cmdKey | shiftKey)), (UInt32(54), kVK_DownArrow, UInt32(optionKey | cmdKey | shiftKey))]
@@ -4668,7 +4671,7 @@ final class KeysPopup: Popup {
     typealias Keys = [(String, String)]
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
         ("Re:Desk", [
-            (nil, [("⌃⌥,", "settings"), ("⌃⌥/", "these keys"), ("⌃⌘L", "lock screen"), ("⌘⇧T", "light / dark"),
+            (nil, [("⌃⌥,", "settings"), ("⌃⌥/", "these keys"), ("⌃⌘L", "lock screen"), ("⌘⇧T", "light / dark"), ("⌃⌥J", "English / 日本語"),
                    ("⌘⇧M", "video wallpaper still / moving")]),
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),

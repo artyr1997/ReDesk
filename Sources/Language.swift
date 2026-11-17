@@ -22,6 +22,12 @@ enum Language: String, CaseIterable {
 
     static var isJapanese: Bool { current == .japanese }
 
+    /// ⌃⌥J: the other one; an open popup is written again in it
+    static func toggle() {
+        current = isJapanese ? .english : .japanese
+        for popup in [SettingsPopup.shared, KeysPopup.shared] as [Popup] where popup.isVisible { popup.refresh() }
+    }
+
     /// each in its own language
     var title: String {
         switch self {
