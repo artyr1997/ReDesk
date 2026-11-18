@@ -4849,6 +4849,8 @@ final class Desk: NSObject, NSApplicationDelegate {
         InkCursors.apply()
         // the windows' corners marked with a +, if kept so (Plus.swift)
         PlusMarks.apply()
+        // the Re apps' windows opening and closing, drawn under them (Opening.swift)
+        Opening.listen()
         // light ink at night: the cursors follow the appearance. The app's own appearance turns the
         // moment the Mac's does, together with the other apps; the notice is a second way to hear of it.
         night = Appearance.dark
