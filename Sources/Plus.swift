@@ -116,8 +116,8 @@ final class PlusView: NSView {
             path.line(to: NSPoint(x: x, y: y + arm))
         }
         path.lineWidth = PlusMarks.line
-        // quiet: a mid grey, half see-through, that reads on light and dark windows alike without standing out
-        NSColor(white: 0.55, alpha: 0.45).setStroke()
+        // in the ink of the desk's words (FILE, SURF…) at rest
+        ink(0.45).setStroke()
         path.stroke()
     }
 }
