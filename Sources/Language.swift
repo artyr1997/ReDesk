@@ -154,6 +154,7 @@ private let japaneseWords: [String: String] = [
     "these keys": "このキー一覧",
     "lock screen": "画面をロック",
     "light / dark": "ライト / ダーク",
+    "plus marks on / off": "角に十字 オン / オフ",
     "video wallpaper still / moving": "動画の壁紙を止める / 動かす",
     "focus the nearest window": "隣のウィンドウへ",
     "trade places with it": "隣と入れ替える",

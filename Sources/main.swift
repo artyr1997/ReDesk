@@ -811,6 +811,7 @@ enum HotKeys {
             case 34: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
             case 35: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
             case 36: Language.toggle()
+            case 37: PlusMarks.on.toggle(); if SettingsPopup.shared.isVisible { SettingsPopup.shared.refresh() }
             case 51: Desktops.shared.step(-1)
             case 52: Desktops.shared.step(1)
             case 53: Desktops.shared.take(-1)
@@ -827,6 +828,8 @@ enum HotKeys {
                (UInt32(34), kVK_ANSI_Comma, modifiers), (UInt32(35), kVK_ANSI_Slash, modifiers),
                // ⌃⌥J: English / 日本語
                (UInt32(36), kVK_ANSI_J, modifiers),
+               // ⌃⌥=: Plus marks on / off
+               (UInt32(37), kVK_ANSI_Equal, modifiers),
                // ⌥⌘↑ / ↓: the desktop above / below; with ⇧ the window in front goes along
                (UInt32(51), kVK_UpArrow, UInt32(optionKey | cmdKey)), (UInt32(52), kVK_DownArrow, UInt32(optionKey | cmdKey)),
                (UInt32(53), kVK_UpArrow, UInt32(optionKey | cmdKey | shiftKey)), (UInt32(54), kVK_DownArrow, UInt32(optionKey | cmdKey | shiftKey))]
@@ -4601,7 +4604,7 @@ final class SettingsPopup: Popup {
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
             toggleRow("Glass windows", Glass.on) { Glass.on = $0 },
-            toggleRow("Plus marks", PlusMarks.on) { PlusMarks.on = $0 },
+            toggleRow("Plus marks", PlusMarks.on, note: "⌃⌥=") { PlusMarks.on = $0 },
             toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {
                     SMAppService.openSystemSettingsLoginItems()
@@ -4687,6 +4690,7 @@ final class KeysPopup: Popup {
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
         ("Re:Desk", [
             (nil, [("⌃⌥,", "settings"), ("⌃⌥/", "these keys"), ("⌃⌘L", "lock screen"), ("⌘⇧T", "light / dark"), ("⌃⌥J", "English / 日本語"),
+                   ("⌃⌥=", "plus marks on / off"),
                    ("⌘⇧M", "video wallpaper still / moving")]),
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
