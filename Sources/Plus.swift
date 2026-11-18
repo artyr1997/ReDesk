@@ -116,15 +116,8 @@ final class PlusView: NSView {
             path.line(to: NSPoint(x: x, y: y + arm))
         }
         path.lineWidth = PlusMarks.line
-        // the desk's white ink, a faint dark rim under it, so it reads on light windows too
-        NSGraphicsContext.current?.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
-        shadow.shadowBlurRadius = 1.5
-        shadow.shadowOffset = .zero
-        shadow.set()
-        ink(0.9).setStroke()
+        // quiet: a mid grey, half see-through, that reads on light and dark windows alike without standing out
+        NSColor(white: 0.55, alpha: 0.45).setStroke()
         path.stroke()
-        NSGraphicsContext.current?.restoreGraphicsState()
     }
 }
