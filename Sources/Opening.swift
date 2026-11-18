@@ -14,8 +14,16 @@ enum Opening {
                   let pid = Int32(words[1]), let number = Int(words[2]) else { return }
             let closing = words[0] == "close"
             guard closing || words[0] == "open" else { return }
-            WindowStage(pid: pid, number: number, closing: closing)?.start()
+            begin(pid: pid, number: number, closing: closing, tries: 12)
         }
+    }
+
+    /// The app asks the moment it shows its window, which the window server may not have yet: asked again
+    /// a little later, a few times
+    private static func begin(pid: Int32, number: Int, closing: Bool, tries: Int) {
+        if let stage = WindowStage(pid: pid, number: number, closing: closing) { return stage.start() }
+        guard tries > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { begin(pid: pid, number: number, closing: closing, tries: tries - 1) }
     }
 }
 
