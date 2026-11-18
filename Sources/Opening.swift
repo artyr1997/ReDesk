@@ -43,9 +43,9 @@ final class WindowStage {
     private var frame: NSRect
 
     // the times, in seconds: opening …
-    private static let open = (plus: 0.18, fill: (0.12, 0.34), grow: (0.34, 0.74), show: 0.70, out: (0.80, 1.10))
+    private static let open = (plus: 0.10, fill: (0.06, 0.20), grow: (0.20, 0.44), show: 0.40, out: (0.55, 0.80))
     // … and closing
-    private static let close = (shrink: (0.30, 0.64), fill: (0.60, 0.82), plus: (0.78, 0.98))
+    private static let close = (shrink: (0.20, 0.42), fill: (0.40, 0.54), plus: (0.52, 0.66))
     private static let margin: CGFloat = 12
 
     init?(pid: Int32, number: Int, closing: Bool) {
