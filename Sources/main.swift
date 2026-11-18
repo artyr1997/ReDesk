@@ -1882,10 +1882,11 @@ enum InkCursors {
         // the arrow: a diamond drawn out to its point (kite), white with a dark rim (InkCursors.kite)
         Shape(names: ["com.apple.coregraphics.ArrowS", "com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowCtx"],
               day: "kite", night: "kite", hotspot: CGPoint(x: 1.7, y: 1.4), rimmed: true),
+        // the text cursor: a thin line between two small diamonds (the desk's ◆)
         Shape(names: ["com.apple.coregraphics.IBeamS", "com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamXOR"],
-              day: "cursor-ibeam", night: "cursor-ibeam-night", hotspot: CGPoint(x: 10, y: 10)),
-        // the hand has a white body inside its outline: it reads on both
-        Shape(names: ["com.apple.cursor.13"], day: "cursor-hand", night: "cursor-hand", hotspot: CGPoint(x: 6.5, y: 1)),
+              day: "ibeam", night: "ibeam", hotspot: CGPoint(x: 10, y: 10), rimmed: true),
+        // the hand (over what opens): the arrow's diamond, upright, pointing at it
+        Shape(names: ["com.apple.cursor.13"], day: "hand", night: "hand", hotspot: CGPoint(x: 10, y: 1.4), rimmed: true),
     ]
     private static let size = CGSize(width: 20, height: 20)
 
@@ -1921,33 +1922,48 @@ enum InkCursors {
         _ = CoreCursorUnregisterAll(CGSMainConnectionID())
     }
 
-    /// The arrow as a diamond drawn out to one side: its point at the top left (where it clicks), long; the
-    /// other three corners close together, behind. As the desk's marks (◆), in a 200 × 200 picture.
-    private static func kite() -> CGImage? {
+    /// The cursors drawn here, white, in a 200 × 200 picture (from its top left): the arrow a diamond drawn
+    /// out to its point (kite), the hand the same upright, the text cursor a thin line between two small ◆.
+    private static func picture(_ name: String) -> CGImage? {
         guard let c = CGContext(data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        // along its length from the point, leaning as the Mac's arrow does (62° from across): u how far, v how
-        // far to the side (in the picture's units, from its top left)
-        let tip = CGPoint(x: 10, y: 6), angle = CGFloat(62) * .pi / 180
-        let along = CGPoint(x: cos(angle), y: sin(angle)), side = CGPoint(x: -sin(angle), y: cos(angle))
-        func at(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
-            CGPoint(x: tip.x + u * along.x + v * side.x, y: 200 - (tip.y + u * along.y + v * side.y))
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: 200 - y) }
+        /// a diamond drawn out to its point at `tip`, leaning `degrees` from across: its sides `side` out,
+        /// `widest` along from the point, its back `length` from it
+        func kite(tip: CGPoint, degrees: CGFloat, side: CGFloat, widest: CGFloat, length: CGFloat) {
+            let angle = degrees * .pi / 180
+            let along = CGPoint(x: cos(angle), y: sin(angle)), across = CGPoint(x: -sin(angle), y: cos(angle))
+            func at(_ u: CGFloat, _ v: CGFloat) -> CGPoint { p(tip.x + u * along.x + v * across.x, tip.y + u * along.y + v * across.y) }
+            c.move(to: at(0, 0)); c.addLine(to: at(widest, side)); c.addLine(to: at(length, 0)); c.addLine(to: at(widest, -side))
+            c.closePath()
         }
-        c.move(to: at(0, 0))
-        c.addLine(to: at(136, 54))
-        c.addLine(to: at(190, 0))
-        c.addLine(to: at(136, -54))
-        c.closePath()
         c.setFillColor(.white)
+        switch name {
+        case "kite":
+            // leaning as the Mac's arrow does
+            kite(tip: CGPoint(x: 10, y: 6), degrees: 62, side: 54, widest: 136, length: 190)
+        case "hand":
+            kite(tip: CGPoint(x: 100, y: 6), degrees: 90, side: 50, widest: 128, length: 184)
+        case "ibeam":
+            // each part filled by itself: overlapping, they would cut holes in each other
+            c.fill(CGRect(x: 93, y: 200 - 166, width: 14, height: 132))
+            for y: CGFloat in [30, 170] {
+                c.move(to: p(100, y - 17)); c.addLine(to: p(117, y)); c.addLine(to: p(100, y + 17)); c.addLine(to: p(83, y))
+                c.closePath()
+                c.fillPath()
+            }
+        default:
+            return nil
+        }
         c.fillPath()
         return c.makeImage()
     }
 
     /// The picture at each scale the screen may want (1×, 2×, 3×, 4×).
     private static func images(_ name: String, rimmed: Bool = false) -> [CGImage]? {
-        let drawn = name == "kite"
-        guard let image = drawn ? kite() : Bundle.main.url(forResource: name, withExtension: "png")
+        let drawn = ["kite", "hand", "ibeam"].contains(name)
+        guard let image = drawn ? picture(name) : Bundle.main.url(forResource: name, withExtension: "png")
             .flatMap({ CGImageSourceCreateWithURL($0 as CFURL, nil) })
             .flatMap({ CGImageSourceCreateImageAtIndex($0, 0, nil) }) else { return nil }
         return (1...4).compactMap { scale in
