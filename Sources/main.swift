@@ -41,9 +41,6 @@ let corners = [
     Corner(name: "NOTE", app: "ReNote", bundle: "com.artursavytskyi.renote", left: false, top: false),
 ]
 
-/// ReDraw: a Re app as the others (its windows tiled, pinned, faded…), but without a word on the desk
-/// (TERM has its corner); D opens it, as F / S / T / N the others
-let drawing = Corner(name: "DRAW", app: "ReDraw", bundle: "com.artursavytskyi.redraw", left: true, top: false)
 
 /// Same rhythm as the apps' side buttons: 20pt letters, one every 32pt, upright.
 let letterSize: CGFloat = 20
@@ -875,7 +872,7 @@ enum CommandKeys {
     private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
 
     /// F, S, D, N with the desk in front: the app of that letter's corner; T: ReTerm
-    private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_T: corners[2], kVK_ANSI_N: corners[3], kVK_ANSI_D: drawing]
+    private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_T: corners[2], kVK_ANSI_N: corners[3]]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
     /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
@@ -940,7 +937,7 @@ enum CommandKeys {
 // cut between it and its neighbour, which gives way as it goes; anything else snaps back.
 // Moving other apps' windows takes the Accessibility permission, asked for when tiling is turned on.
 
-let tiledApps: Set<String> = Set((corners + [drawing]).map(\.bundle))
+let tiledApps: Set<String> = Set(corners.map(\.bundle))
 /// between the windows: none while Flush (they make one window), else 10
 var tileGap: CGFloat { Tiler.shared.flush ? 0 : edgeGap }
 /// from the screen's edges in Almost Full
@@ -3707,7 +3704,7 @@ final class LidLight {
 
 /// What a number of knocks does.
 enum KnockAction: String, CaseIterable {
-    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, blurWallpaper, file, surf, hear, note, term
+    case none, lock, playPause, mute, screenshot, hideWindows, closeWindows, nextWallpaper, freezeWallpaper, blurWallpaper, file, surf, note, term
 
     var title: String {
         switch self {
@@ -3723,7 +3720,6 @@ enum KnockAction: String, CaseIterable {
         case .blurWallpaper: return "Blur Wallpaper"
         case .file: return "Open ReFile"
         case .surf: return "Open ReSurf"
-        case .hear: return "Open ReDraw"
         case .note: return "Open ReNote"
         case .term: return "Open ReTerm"
         }
@@ -3761,13 +3757,12 @@ enum KnockAction: String, CaseIterable {
         case .blurWallpaper: WallpaperBlur.on.toggle()
         case .file: ReDesk.open(corners[0])
         case .surf: ReDesk.open(corners[1])
-        case .hear: ReDesk.open(drawing)
         case .note: ReDesk.open(corners[3])
         case .term: ReDesk.open(corners[2])
         }
     }
 
-    /// the Re apps (ReFile, ReSurf, ReDraw, ReNote, ReTerm) running on the desktop in sight
+    /// the Re apps (ReFile, ReSurf, ReNote, ReTerm) running on the desktop in sight
     private static func reApps() -> [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter {
             tiledApps.contains($0.bundleIdentifier ?? "") && Desktops.shared.desktop(of: $0) == Desktops.shared.current
@@ -4738,7 +4733,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
                          ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
                          ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
-            ("On the desk", [("F / S / T / N / D", "ReFile / ReSurf / ReTerm / ReNote / ReDraw")]),
+            ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
             ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
             ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
                                 ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
@@ -4757,15 +4752,13 @@ final class KeysPopup: Popup {
                         ("↑ / ↓  Enter", "choose, open")]),
             ("ReChat", [("Enter", "send"), ("⇧Enter", "new line")]),
         ]),
-        ("Re:Draw", [
-            (nil, [("⌘N", "new window"), ("B / K / E", "pen / brush / rubber"), ("T", "the trackpad as a tablet"), ("1 – 4  [ ]", "line"),
-                   ("⌘Z / ⇧⌘Z", "undo / redo"), ("⌘+ / ⌘−  pinch", "nearer / further"), ("⌘0", "as it was"), ("Backspace", "clear"), ("⌘S", "save a PNG"), ("I", "info")]),
-        ]),
         ("Re:Note", [
             ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
                        ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
             ("A note", [("⌘S", "save"), ("⌥← / ⌥→", "previous / next note"), ("Esc", "back")]),
-            ("Writing", [("⌘B", "highlight"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
+            ("Writing", [("⌘B", "highlight"), ("⌘D", "draw"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
+            ("Drawing", [("B / K / E", "pen / brush / rubber"), ("T", "the trackpad as a tablet"), ("1 – 4  [ ]", "line"),
+                         ("⌘+ / ⌘−  pinch", "nearer / further"), ("Backspace", "clear"), ("Esc", "back to the note")]),
         ]),
     ]
 
