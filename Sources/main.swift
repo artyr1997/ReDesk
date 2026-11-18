@@ -4757,8 +4757,7 @@ final class KeysPopup: Popup {
                        ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
             ("A note", [("⌘S", "save"), ("⌥← / ⌥→", "previous / next note"), ("Esc", "back")]),
             ("Writing", [("⌘B", "highlight"), ("⌘D", "draw"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
-            ("Drawing", [("B / K / E", "pen / brush / rubber"), ("T", "the trackpad as a tablet"), ("1 – 4  [ ]", "line"),
-                         ("⌘+ / ⌘−  pinch", "nearer / further"), ("Backspace", "clear"), ("Esc", "back to the note")]),
+            ("Drawing", [("drag", "draw"), ("⌥ drag", "rub out")]),
         ]),
     ]
 
