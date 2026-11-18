@@ -8,7 +8,7 @@ enum PlusMarks {
     private static let key = "plus"
     /// each arm of a +, from its middle, and its line
     static let arm: CGFloat = 7
-    static let line: CGFloat = 1
+    static let line: CGFloat = 1.5
 
     static var on: Bool {
         get { UserDefaults.standard.bool(forKey: key) }
@@ -108,8 +108,8 @@ final class PlusView: NSView {
         let path = NSBezierPath()
         let arm = PlusMarks.arm
         for p in points {
-            // on the pixel grid, so a 1pt line is sharp
-            let x = (p.x).rounded() + 0.5, y = (p.y).rounded() - 0.5
+            // on the pixel grid (three of a Retina screen's), so the line is sharp
+            let x = (p.x).rounded() + 0.25, y = (p.y).rounded() - 0.25
             path.move(to: NSPoint(x: x - arm, y: y))
             path.line(to: NSPoint(x: x + arm, y: y))
             path.move(to: NSPoint(x: x, y: y - arm))
