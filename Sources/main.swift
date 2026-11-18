@@ -1935,9 +1935,9 @@ enum InkCursors {
             CGPoint(x: tip.x + u * along.x + v * side.x, y: 200 - (tip.y + u * along.y + v * side.y))
         }
         c.move(to: at(0, 0))
-        c.addLine(to: at(138, 40))
-        c.addLine(to: at(186, 0))
-        c.addLine(to: at(138, -40))
+        c.addLine(to: at(136, 54))
+        c.addLine(to: at(190, 0))
+        c.addLine(to: at(136, -54))
         c.closePath()
         c.setFillColor(.white)
         c.fillPath()
@@ -1962,7 +1962,7 @@ enum InkCursors {
             }
             // the ink a little smaller, room left round it for the rim; pure white, its tip made sharp (the
             // brush's own tip is too thin to see at this size); its dark shape drawn all round it
-            let rim = CGFloat(side) * 0.04
+            let rim = CGFloat(side) * 0.05
             let whole = CGRect(x: 0, y: 0, width: side, height: side)
             let place = whole.insetBy(dx: rim, dy: rim)
             func layer(_ color: CGColor, from source: CGImage?) -> CGImage? {
