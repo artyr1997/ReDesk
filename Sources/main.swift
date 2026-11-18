@@ -1879,8 +1879,9 @@ enum InkCursors {
     // since macOS 26 the arrow and the I-beam are drawn from the …S names; the old ones are still
     // accepted, without effect (Mousecape PR #308)
     private static let shapes = [
+        // the arrow: a diamond drawn out to its point (kite), white with a dark rim (InkCursors.kite)
         Shape(names: ["com.apple.coregraphics.ArrowS", "com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowCtx"],
-              day: "cursor-arrow-night", night: "cursor-arrow-night", hotspot: CGPoint(x: 1, y: 1), rimmed: true),
+              day: "kite", night: "kite", hotspot: CGPoint(x: 1.7, y: 1.4), rimmed: true),
         Shape(names: ["com.apple.coregraphics.IBeamS", "com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamXOR"],
               day: "cursor-ibeam", night: "cursor-ibeam-night", hotspot: CGPoint(x: 10, y: 10)),
         // the hand has a white body inside its outline: it reads on both
@@ -1920,11 +1921,35 @@ enum InkCursors {
         _ = CoreCursorUnregisterAll(CGSMainConnectionID())
     }
 
+    /// The arrow as a diamond drawn out to one side: its point at the top left (where it clicks), long; the
+    /// other three corners close together, behind. As the desk's marks (◆), in a 200 × 200 picture.
+    private static func kite() -> CGImage? {
+        guard let c = CGContext(data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        // along its length from the point, leaning as the Mac's arrow does (62° from across): u how far, v how
+        // far to the side (in the picture's units, from its top left)
+        let tip = CGPoint(x: 10, y: 6), angle = CGFloat(62) * .pi / 180
+        let along = CGPoint(x: cos(angle), y: sin(angle)), side = CGPoint(x: -sin(angle), y: cos(angle))
+        func at(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
+            CGPoint(x: tip.x + u * along.x + v * side.x, y: 200 - (tip.y + u * along.y + v * side.y))
+        }
+        c.move(to: at(0, 0))
+        c.addLine(to: at(138, 40))
+        c.addLine(to: at(186, 0))
+        c.addLine(to: at(138, -40))
+        c.closePath()
+        c.setFillColor(.white)
+        c.fillPath()
+        return c.makeImage()
+    }
+
     /// The picture at each scale the screen may want (1×, 2×, 3×, 4×).
     private static func images(_ name: String, rimmed: Bool = false) -> [CGImage]? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let drawn = name == "kite"
+        guard let image = drawn ? kite() : Bundle.main.url(forResource: name, withExtension: "png")
+            .flatMap({ CGImageSourceCreateWithURL($0 as CFURL, nil) })
+            .flatMap({ CGImageSourceCreateImageAtIndex($0, 0, nil) }) else { return nil }
         return (1...4).compactMap { scale in
             let side = Int(size.width) * scale
             guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
@@ -1947,6 +1972,8 @@ enum InkCursors {
                 c.interpolationQuality = .high
                 if let source {
                     c.draw(source, in: whole)
+                } else if drawn {
+                    c.draw(image, in: place)
                 } else {
                     c.draw(image, in: place)
                     // the tip: a wedge along the head's two edges (in the 200 × 200 picture, from its top left)
