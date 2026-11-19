@@ -4733,7 +4733,7 @@ final class KeysPopup: Popup {
             ("View", [("← →  Space", "turn the page"), ("M", "manga"), ("F", "full screen")]),
         ]),
         ("Re:Surf", [
-            (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⌘[ / ⌘]", "back / forward"),
+            (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
                    ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘E", "e-ink"), ("⌘I", "info"), ("⌘J", "ReChat")]),
             ("Search", [("A / I / V", "all / images / videos"), ("F", "the same in Marginalia"), ("← / →", "previous / next page"),
                         ("↑ / ↓  Enter", "choose, open")]),
@@ -4748,7 +4748,7 @@ final class KeysPopup: Popup {
         ]),
         ("Re:Term", [
             (nil, [("⌘N", "new window"), ("⌘⇧T / H / C", "TERM / HOMO / CHAT"), ("⌘⇧F", "the whole window"), ("⌘K", "new conversation"),
-                   ("⌥↑ / ⌥↓", "the conversation above / below")]),
+                   ("⇧↑ / ⇧↓", "the conversation above / below")]),
             ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
                       ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
             ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),

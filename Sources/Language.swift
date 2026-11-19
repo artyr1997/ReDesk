@@ -174,6 +174,7 @@ private let japaneseWords: [String: String] = [
     "flush on / off": "隙間なし オン / オフ",
     "fill the screen / the desk": "画面 / デスクいっぱいに",
     "previous / next wallpaper": "前 / 次の壁紙",
+    "previous / next tab": "前 / 次のタブ",
     "blur the wallpaper on / off": "壁紙ぼかし オン / オフ",
     "2 – 5 knocks": "2 – 5回ノック",
     "as chosen in settings": "設定で選んだ通り",
