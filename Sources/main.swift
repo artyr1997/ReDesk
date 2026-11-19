@@ -1655,7 +1655,7 @@ final class Tiler {
     }
 
     /// Glass windows joined as one (Flush, side by side): one glass under them all (GlassBackdrop)
-    private var sharedGlass: Bool { on && Glass.on && flush && !arrangement.stacks && order.count > 1 }
+    private var sharedGlass: Bool { on && flush && !arrangement.stacks && order.count > 1 }
 
     func retile() {
         guard on, AXIsProcessTrusted() else { return }
@@ -1814,20 +1814,8 @@ final class Tiler {
 // ── the Mac's appearance and cursors ──
 
 /// ⌘⇧T: the Mac between light and dark. System Events does it, so macOS asks once whether ReDesk may.
-/// Glass windows (an experiment): the Re apps' windows as the system's blur of what is behind them, written
-/// in the desk's white ink. Kept, and told to the apps (they read it at start too).
-enum Glass {
-    static var on: Bool {
-        get { UserDefaults.standard.bool(forKey: "glass") }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "glass")
-            DistributedNotificationCenter.default().postNotificationName(
-                Notification.Name("com.artursavytskyi.re.glass"), object: newValue ? "1" : "0", userInfo: nil, deliverImmediately: true)
-            // joined windows: one glass under them, or none
-            Tiler.shared.retile()
-        }
-    }
-}
+/// (The Re apps' windows are glass whatever the Mac is: the system's blur of what is behind them, written in
+/// the desk's white ink.)
 
 enum Appearance {
     static func toggle() {
@@ -4350,15 +4338,13 @@ final class Snap {
 
 // ── the two popups: Settings (⌃⌥, or a right click) and Keys (⌃⌥/), every Re app's keys ──
 
-/// The Re apps' popups (as ReNote's INFO): the paper, its grain and a 2pt line round it, in the middle of the
-/// screen, everything else blurred behind; the heading in Noto Sans JP spaced wide, the words in Kurale.
-/// Light or dark as the Mac is. Esc, the same keys again, or a click beside it closes it.
+/// The Re apps' popups (as their INFO on glass): a darker frosted pane and a line round it, in the middle of
+/// the screen, everything else blurred behind; the heading in Noto Sans JP spaced wide, the words in M PLUS 1p. Esc, the same keys again, or a click beside it closes it.
 class Popup: NSPanel {
-    /// the paper's colours, as the apps' --bg, --text and --line
-    /// on glass: a darker frosted pane, the words in the desk's white, as the apps' popups then
-    static var paper: NSColor { Glass.on ? NSColor(white: 0, alpha: 0.32) : Appearance.dark ? NSColor(white: 0x1d / 255.0, alpha: 1) : NSColor(white: 0xF4 / 255.0, alpha: 1) }
-    static var text: NSColor { Glass.on ? NSColor(white: 1, alpha: 0.8) : Appearance.dark ? NSColor(white: 0x80 / 255.0, alpha: 1) : NSColor(white: 0x47 / 255.0, alpha: 1) }
-    static var line: NSColor { Glass.on ? NSColor(white: 1, alpha: 0.5) : Appearance.dark ? NSColor(white: 0x74 / 255.0, alpha: 1) : NSColor(red: 0x57 / 255.0, green: 0x58 / 255.0, blue: 0x5A / 255.0, alpha: 1) }
+    /// the pane's colours, as the apps' --bg, --text and --line on glass: the words in the desk's white
+    static let paper = NSColor(white: 0, alpha: 0.32)
+    static let text = NSColor(white: 1, alpha: 0.8)
+    static let line = NSColor(white: 1, alpha: 0.5)
 
     static let fonts: Void = {
         for name in ["Kurale"] {
@@ -4372,12 +4358,11 @@ class Popup: NSPanel {
         _ = letterFont
     }()
     static func noto(_ size: CGFloat) -> NSFont { _ = fonts; return NSFont(name: "NotoSansJP-Regular", size: size) ?? .systemFont(ofSize: size, weight: .light) }
-    /// the words' font: Kurale, or M PLUS 1p on glass (as the apps' text then)
+    /// the words' font: M PLUS 1p (as the apps' text on glass), Kurale if it can't be loaded
     static func kurale(_ size: CGFloat) -> NSFont {
         _ = fonts
-        if Glass.on, let font = NSFont(name: "MPLUS1p-Regular", size: size) { return font }
+        if let font = NSFont(name: "MPLUS1p-Regular", size: size) { return font }
         return NSFont(name: "Kurale-Regular", size: size) ?? NSFont(name: "Kurale", size: size) ?? .systemFont(ofSize: size) }
-    static let grain = Bundle.main.image(forResource: "noise")
 
     private let paperView = PaperView()
     private lazy var veil: NSWindow = {
@@ -4427,7 +4412,7 @@ class Popup: NSPanel {
         refresh()
         if let screen = NSScreen.main {
             veil.setFrame(screen.frame, display: true)
-            veil.appearance = NSAppearance(named: Appearance.dark || Glass.on ? .darkAqua : .aqua)
+            veil.appearance = NSAppearance(named: .darkAqua)
             veil.orderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -4436,8 +4421,8 @@ class Popup: NSPanel {
 
     func refresh() {
         actions = []
-        // the lists a choice opens, light or dark with the paper
-        appearance = NSAppearance(named: Appearance.dark || Glass.on ? .darkAqua : .aqua)
+        // the lists a choice opens, dark as the pane
+        appearance = NSAppearance(named: .darkAqua)
         veil.appearance = appearance
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let width = width(on: screen)
@@ -4474,8 +4459,7 @@ class Popup: NSPanel {
 
     func words(_ words: String, size: CGFloat = 14, alpha: CGFloat = 1) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: tr(words))
-        // Kurale has no kana or kanji: in Japanese, Noto Sans JP, a little smaller
-        field.font = Language.isJapanese && !Glass.on ? Self.noto(size - 1) : Self.kurale(size)
+        field.font = Self.kurale(size)
         field.textColor = Self.text.withAlphaComponent(alpha)
         field.isSelectable = false
         return field
@@ -4581,19 +4565,14 @@ class Popup: NSPanel {
     }
 }
 
-/// the popup's sheet of paper
+/// the popup's pane
 final class PaperView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         Popup.paper.setFill()
         bounds.fill()
-        if !Glass.on, let grain = Popup.grain {
-            // as the apps: at night the grain is multiplied into the paper (background-blend-mode: multiply)
-            NSColor(patternImage: grain).setFill()
-            bounds.fill(using: Appearance.dark ? .multiply : .sourceOver)
-        }
         Popup.line.setStroke()
-        let edge = NSBezierPath(rect: bounds.insetBy(dx: Glass.on ? 0.5 : 1, dy: Glass.on ? 0.5 : 1))
-        edge.lineWidth = Glass.on ? 1 : 2
+        let edge = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
+        edge.lineWidth = 1
         edge.stroke()
     }
 }
@@ -4641,7 +4620,6 @@ final class SettingsPopup: Popup {
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
-            toggleRow("Glass windows", Glass.on) { Glass.on = $0 },
             toggleRow("Plus marks", PlusMarks.on, note: "⌃⌥=") { PlusMarks.on = $0 },
             toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {

@@ -1,7 +1,7 @@
 import AppKit
 
 /// A Re app's window opening and closing, drawn by the desk under it. Opening: the corners' + come first,
-/// round the window's whole width but a quarter of its height, in its middle; then the glass (or the paper)
+/// round the window's whole width but a quarter of its height, in its middle; then the glass
 /// fills them; then it grows to the window's height, and the window's interface fades in over it (the app
 /// is told "show-window", as for a desktop coming back). Closing: the same, backwards.
 /// The apps ask by a distributed notification, "open <pid> <window number>" or "close …" (their tell_desk).
@@ -131,7 +131,7 @@ final class WindowStage {
     }
 }
 
-/// The stage: the glass (or paper) of the window, as tall as it has grown, and the + at its corners.
+/// The stage: the glass of the window, as tall as it has grown, and the + at its corners.
 final class StageView: NSView {
     private let margin: CGFloat
     private var height: CGFloat = 0.25
@@ -143,15 +143,13 @@ final class StageView: NSView {
         self.margin = margin
         super.init(frame: frame)
         wantsLayer = true
-        if Glass.on {
-            // as the apps' glass (their set_glass): the dark HUD blur, square corners
-            glass.material = .hudWindow
-            glass.blendingMode = .behindWindow
-            glass.state = .active
-            glass.appearance = NSAppearance(named: .darkAqua)
-            glass.alphaValue = 0
-            addSubview(glass)
-        }
+        // as the apps' glass (their set_glass): the dark HUD blur, square corners
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.appearance = NSAppearance(named: .darkAqua)
+        glass.alphaValue = 0
+        addSubview(glass)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -160,10 +158,8 @@ final class StageView: NSView {
         self.height = height
         self.fill = fill
         self.plus = plus
-        if Glass.on {
-            glass.frame = box()
-            glass.alphaValue = fill
-        }
+        glass.frame = box()
+        glass.alphaValue = fill
         needsDisplay = true
     }
 
@@ -176,12 +172,6 @@ final class StageView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let box = box()
-        if !Glass.on && fill > 0 {
-            // the apps' paper, light or dark, its corners round as theirs
-            let paper = Appearance.dark ? NSColor(white: 0.114, alpha: 1) : NSColor(white: 0.957, alpha: 1)
-            paper.withAlphaComponent(fill).setFill()
-            NSBezierPath(roundedRect: box, xRadius: 12, yRadius: 12).fill()
-        }
         guard plus > 0 else { return }
         let path = NSBezierPath()
         let arm = PlusMarks.arm
