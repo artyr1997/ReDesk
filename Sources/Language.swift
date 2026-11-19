@@ -22,7 +22,7 @@ enum Language: String, CaseIterable {
 
     static var isJapanese: Bool { current == .japanese }
 
-    /// ⌃⌥J: the other one; an open popup is written again in it
+    /// ⌘J: the other one; an open popup is written again in it
     static func toggle() {
         current = isJapanese ? .english : .japanese
         for popup in [SettingsPopup.shared, KeysPopup.shared] as [Popup] where popup.isVisible { popup.refresh() }
@@ -92,7 +92,7 @@ private let japaneseWords: [String: String] = [
     "On": "オン",
     "Off": "オフ",
     "Quit": "終了",
-    "⌃⌥, settings  ·  ⌃⌥/ keys": "⌃⌥, 設定  ·  ⌃⌥/ キー",
+    "⌘, settings  ·  ⌘/ keys": "⌘, 設定  ·  ⌘/ キー",
     "looking": "検索中",
 
     // ── arrangements ──
@@ -136,7 +136,7 @@ private let japaneseWords: [String: String] = [
     "MEMENTO MORI": "死を忘れるな",
 
     // ── keys ──
-    "⌃⌥/ or Esc closes  ·  ⌃⌥, settings": "⌃⌥/ か Esc で閉じる  ·  ⌃⌥, 設定",
+    "⌘/ or Esc closes  ·  ⌘, settings": "⌘/ か Esc で閉じる  ·  ⌘, 設定",
     "Windows": "ウィンドウ",
     "On the desk": "デスクで",
     "Desktops": "デスクトップ",
@@ -174,6 +174,7 @@ private let japaneseWords: [String: String] = [
     "flush on / off": "隙間なし オン / オフ",
     "fill the screen / the desk": "画面 / デスクいっぱいに",
     "previous / next wallpaper": "前 / 次の壁紙",
+    "blur the wallpaper on / off": "壁紙ぼかし オン / オフ",
     "2 – 5 knocks": "2 – 5回ノック",
     "as chosen in settings": "設定で選んだ通り",
     "snap or clap": "指パッチンか拍手",

@@ -4,12 +4,12 @@ The Re apps as words in the corners of the desktop: FILE (ReFile) and SURF (ReSu
 
 Around them:
 - **Top**: the battery, a line across the top filled from both its ends toward the middle as far as charged.
-- **Right edge**: the wallpapers in `wallpapers/Light` or `wallpapers/Dark`, as the Mac's appearance is (pictures, and videos: mp4 / mov), a dash each one above another, as the desktops on the left (the one on the desk longer and stronger); when the appearance changes (⌘⇧T, say) the desktop takes the other folder's wallpaper, the one last chosen there or its first. The folders stay out of git (too big). A click sets one, **⌘⇧↑ / ⌘⇧↓** step through them (in the Re apps, see Keys). The old wallpaper fades into the new one (once a new video has its first frame); while the new one loads, the old one blurs, draws a little nearer and darkens, breathing, so the new one comes into focus. Settings › Wallpaper › Blur wallpaper blurs it, a picture or a video, fading as it turns on or off (kept between launches).
+- **Right edge**: the wallpapers in `wallpapers/Light` or `wallpapers/Dark`, as the Mac's appearance is (pictures, and videos: mp4 / mov), a dash each one above another, as the desktops on the left (the one on the desk longer and stronger); when the appearance changes (⌘⇧T, say) the desktop takes the other folder's wallpaper, the one last chosen there or its first. The folders stay out of git (too big). A click sets one, **⌥← / ⌥→** step through them (on the desk and in the Re apps, see Keys). The old wallpaper fades into the new one (once a new video has its first frame); while the new one loads, the old one blurs, draws a little nearer and darkens, breathing, so the new one comes into focus. Settings › Wallpaper › Blur wallpaper blurs it, a picture or a video, fading as it turns on or off (kept between launches).
 - Videos play muted and looping under the desktop icons on every screen, and pause while the displays sleep. A still of the first frame (kept in `~/Library/Application Support/ReDesk`) is set as the macOS wallpaper underneath, so the choice survives a restart.
 - **Left edge**: ReDesk's own desktops, a dash each (see Desktops below). (The day's line, how much of the day has gone, is out for now.)
 - **Bottom**: while sound plays, three soft lines drift like a wave, as high as the sound is loud; in silence they settle flat and away. The loudness comes from a Core Audio tap, so macOS asks once for permission to capture audio (nothing is recorded or kept).
 
-**Tiling** (right click › Tile Windows, or **⌃⌥T**): the windows of the Re apps (ReFile, ReSurf, ReDraw, ReNote) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest is the main one and the arrangement places the rest:
+**Tiling** (right click › Tile Windows, or **⌘.**): the windows of the Re apps (ReFile, ReSurf, ReDraw, ReNote) share the middle of the desk, between the side columns, 40pt under the day line and over the wave, 10pt apart. One window fills it; with more, the newest is the main one and the arrangement places the rest:
   - **Main and Stack**: the main one on the left half, the others one above another on the right
   - **Main on Top**: the main one across the top 60%, the others side by side under it
   - **Main in the Middle**: the main one in the middle half, the others shared out to the left and the right
@@ -22,35 +22,38 @@ Around them:
 
 **Flush** (⌘9, or Settings › Tile windows › Flush): no room between the tiled windows, and only the outer corners of them all rounded, so they make one window. ReDesk tells each app which of its window's corners are outer and which edges touch another window (a distributed notification, `com.artursavytskyi.re.corners`); the app rounds only those corners (the windows have no rim and cast no shadow, alone or not).
 
-**Desktops**: ReDesk's own, one above another (macOS's Spaces are left alone). Each window of the Re apps is on one, on its own: two windows of one app can be on two desktops. The windows of the others are out of sight (their app puts each away when asked, `hide-window <pid> <window number>`, and back, `show-window …`), and tiling lays out only the one in sight. On the left edge, around its middle, a dash for each, top to bottom, the one in sight longer; a click goes to one. ⌥⌘↑ / ⌥⌘↓ go up and down, ⌥⌘⇧↑ / ⌥⌘⇧↓ take the window in front along (only it, not its app's other windows). As many as are used, and an empty one under them to take a window to; emptied ones go. A new window opens on the desktop in sight; bringing forward an app whose windows are all on another (⌘Tab, the Dock, its corner word) goes to that one. Going down, the windows rise and fade away while the next desktop's fade in rising into their places; going up, the other way. Hide / Show Windows keeps to the desktop in sight. The desktops last while ReDesk runs (windows are known by their numbers, new each launch).
+**Desktops**: ReDesk's own, one above another (macOS's Spaces are left alone). Each window of the Re apps is on one, on its own: two windows of one app can be on two desktops. The windows of the others are out of sight (their app puts each away when asked, `hide-window <pid> <window number>`, and back, `show-window …`), and tiling lays out only the one in sight. On the left edge, around its middle, a dash for each, top to bottom, the one in sight longer; a click goes to one. ⌥↑ / ⌥↓ go up and down, ⌘⌃↑ / ⌘⌃↓ take the window in front along (only it, not its app's other windows). As many as are used, and an empty one under them to take a window to; emptied ones go. A new window opens on the desktop in sight; bringing forward an app whose windows are all on another (⌘Tab, the Dock, its corner word) goes to that one. Going down, the windows rise and fade away while the next desktop's fade in rising into their places; going up, the other way. Hide / Show Windows keeps to the desktop in sight. The desktops last while ReDesk runs (windows are known by their numbers, new each launch).
 
-  Pick one in the right-click menu or with **⌘1…⌘8** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌃⌥⇧ arrows** move it to its neighbour's place. **⌃⌥P** pins the focused window to its place, an anchor: windows opening and closing, swaps and a new main one go round it, and it stays where it is (a frame lights up over it for a moment, and the app writes P in the window's top left corner, under the diamond a focused window has there; ⌃⌥P again lets it go, the frame fainter). Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Pulling a window's edge resizes it within the arrangement: the cut between it and its neighbour moves, and the neighbour gives way as it goes (no part narrower than 240 points). **⌃⌥⌘ arrows** do the same from the keyboard: the border between the focused window and its neighbour moves that way, 80 points at a time, so a window on the left grows with → and one on the right with ← (the border on the right, or below, when the window has neighbours on both sides). The sizes are kept per arrangement and number of windows until ReDesk quits; choosing the arrangement already in use evens them out again. One at a Time and Full Screen have nothing to share, so there a resized window goes back. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
+  Pick one in the right-click menu or with **⌘1…⌘8** in the Re apps (both also turn tiling on), or step through them with **⌃⌥Space**; the choice is kept. **⌃⌥↩** makes the focused window the main one, **⌘⌥ arrows** move it to its neighbour's place. **⌃⌥P** pins the focused window to its place, an anchor: windows opening and closing, swaps and a new main one go round it, and it stays where it is (a frame lights up over it for a moment, and the app writes P in the window's top left corner, under the diamond a focused window has there; ⌃⌥P again lets it go, the frame fainter). Windows glide to their places (ease-out, a third of a second; instant with Reduce Motion). They are held there like magnets: a window moved by hand goes back when the mouse is let go, and one dragged onto another's place swaps with it, the place lighting up while it is dragged over. Pulling a window's edge resizes it within the arrangement: the cut between it and its neighbour moves, and the neighbour gives way as it goes (no part narrower than 240 points). **⌘fn arrows** do the same from the keyboard: the border between the focused window and its neighbour moves that way, 80 points at a time, so a window on the left grows with → and one on the right with ← (the border on the right, or below, when the window has neighbours on both sides). The sizes are kept per arrangement and number of windows until ReDesk quits; choosing the arrangement already in use evens them out again. One at a Time and Full Screen have nothing to share, so there a resized window goes back. Minimised, hidden and full-screen windows are left alone. Moving other apps' windows needs the Accessibility permission, which macOS asks for when tiling is first turned on. The build is signed ad-hoc but known by its identifier (see `build.sh`), so the permission stays from one build to the next.
 
 **Keys**
 
 | Keys | Where | What |
 |---|---|---|
-| ⌃⌥← ⌃⌥→ ⌃⌥↑ ⌃⌥↓ | anywhere | focus the nearest window that way (in One at a Time: back and forth through them) |
-| ⌃⌥⇧← ⌃⌥⇧→ ⌃⌥⇧↑ ⌃⌥⇧↓ | anywhere, while tiling | the focused window trades places with the nearest one that way (in One at a Time: moves back / forth in the turn) |
-| ⌃⌥T | anywhere | tiling on / off |
-| ⌘1…⌘8 | in the Re apps | an arrangement, tiling on |
-| ⌘0 | in the Re apps | Almost Full on / off |
-| ⌘9 | in the Re apps | Flush on / off |
-| F / S / D / N | on the desk (no app in front but ReDesk or Finder's desktop) | ReFile / ReSurf / ReDraw / ReNote |
-| ⌥⌘↑ / ⌥⌘↓ | anywhere | the desktop above / below |
-| ⌥⌘⇧↑ / ⌥⌘⇧↓ | anywhere | the window in front to the desktop above / below, and there with it |
+| ⌘, | on the desk, in the Re apps | settings |
+| ⌘/ | on the desk, in the Re apps | every Re app's keys |
+| ⌘L | on the desk, in the Re apps | the lock screen (also in the right-click menu, and after 5 minutes untouched unless something keeps the display awake) |
+| ⌘J | on the desk, in the Re apps | English / 日本語 |
+| ⌘⇧T | anywhere | the Mac between light and dark (through System Events: macOS asks once) |
+| ⌘⇧M | anywhere | a video wallpaper stands still, or moves again (kept between launches) |
+| ⌘⇧B | anywhere | the wallpaper blurred, or sharp again |
+| ⌘← ⌘→ ⌘↑ ⌘↓ | on the desk, in the Re apps | focus the nearest window that way (in One at a Time: back and forth through them) |
+| ⌘⌥← ⌘⌥→ ⌘⌥↑ ⌘⌥↓ | on the desk, in the Re apps, while tiling | the focused window trades places with the nearest one that way (in One at a Time: moves back / forth in the turn) |
+| ⌘fn← ⌘fn→ ⌘fn↑ ⌘fn↓ | on the desk, in the Re apps, while tiling | the border between the focused window and its neighbour moves that way |
+| ⌥↑ / ⌥↓ | on the desk, in the Re apps | the desktop above / below |
+| ⌘⌃↑ / ⌘⌃↓ | on the desk, in the Re apps | the window in front to the desktop above / below, and there with it |
+| ⌥← / ⌥→ | on the desk, in the Re apps | previous / next wallpaper |
+| ⌘= | on the desk, in the Re apps | plus marks on / off |
+| ⌘- | on the desk, in the Re apps | Flush on / off |
+| ⌘0 | on the desk, in the Re apps | Almost Full on / off |
+| ⌘. | on the desk, in the Re apps | tiling on / off |
+| ⌘1…⌘8 | on the desk, in the Re apps | an arrangement, tiling on |
 | ⌃⌥Space | anywhere | next arrangement |
 | ⌃⌥↩ | anywhere | the focused window becomes the main one |
 | ⌃⌥P | anywhere, while tiling | pin the focused window to its place / let it go |
-| ⌘↑ / ⌘↓ | in the Re apps | the focused window fills the screen / the desk's middle; tiling stops |
-| ⌘⇧↑ / ⌘⇧↓ | in the Re apps | previous / next wallpaper |
-| ⌘⇧T | anywhere | the Mac between light and dark (through System Events: macOS asks once) |
-| ⌘⇧M | anywhere | a video wallpaper stands still, or moves again (kept between launches) |
-| ⌃⌘L | anywhere | the lock screen (also in the right-click menu, and after 5 minutes untouched unless something keeps the display awake) |
-| ⌃⌥, | anywhere | settings |
-| ⌃⌥/ | anywhere | every Re app's keys |
+| F / S / T / N | on the desk (no app in front but ReDesk or Finder's desktop) | ReFile / ReSurf / ReTerm / ReNote |
 
-The ⌘ keys are taken only while a Re app is in front, so they keep their usual meaning everywhere else (and lose it inside the Re apps: ⌘↑ / ⌘↓ no longer jump to the top / bottom of a text there). They are read with an event tap, which needs the same Accessibility permission as tiling.
+The ⌘ and ⌥ keys are taken only while the desk or a Re app is in front, so they keep their usual meaning everywhere else; inside the Re apps they are the desk's, but for ⌘ and ⌥ arrows while something is being typed (a text field has the focus), which stay the text's. They are read with an event tap, which needs the same Accessibility permission as tiling.
 
 **Ink cursors**: the Re apps' brush-drawn arrow, I-beam and pointing hand become the whole Mac's cursors (light ink while the Mac is dark; the arrow pure white always, its tip sharp, with a dark rim so it reads on a light screen), set in CoreGraphics' cursor registry the way Mousecape does it; macOS 26 draws the arrow and the I-beam from new names (`…ArrowS`, `…IBeamS`), the old ones are set too for older systems. They go when ReDesk quits, or with right click › Ink Cursors.
 

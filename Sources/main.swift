@@ -4,9 +4,9 @@
 // Bottom: a wave while sound plays. (The day's line is out for now.)
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Knocks: two to five knocks on the MacBook, each an action.
-// Keys: ⌃⌥ arrows move the focus between windows (anywhere); in the Re apps ⌘⇧↑/↓ step the wallpapers,
-// ⌘↑ makes a window fill the screen, ⌘↓ the desk's middle (tiling stops), ⌘1…⌘8 pick an arrangement;
-// ⌘⇧T switches the Mac between light and dark (anywhere).
+// Keys: on the desk and in the Re apps ⌘ arrows move the focus between windows, ⌥← / ⌥→ step the
+// wallpapers, ⌥↑ / ⌥↓ the desktops, ⌘1…⌘8 pick an arrangement (CommandKeys); ⌘⇧T switches the Mac
+// between light and dark (anywhere: HotKeys).
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
 import AppKit
@@ -759,25 +759,11 @@ extension Notification.Name {
     static let desktopsChanged = Notification.Name("ReDeskDesktopsChanged")
 }
 
-/// From anywhere (Carbon hot keys need no permissions): ⌃⌥ arrows move the focus between windows,
-/// ⌃⌥T turns tiling on and off, ⌃⌥Space goes to the next arrangement (⌘1…⌘8 pick one: CommandKeys),
-/// ⌃⌥↩ makes the focused window the main one, ⌃⌥⇧ arrows move it to its neighbour's place,
-/// ⌃⌥P pins it (an anchor: it keeps its place).
-/// ⌘⇧T switches the Mac between light and dark.
+/// From anywhere (Carbon hot keys need no permissions): ⌘⇧T the Mac between light and dark, ⌘⇧M the video
+/// wallpaper still or moving, ⌘⇧B the wallpaper blurred or not; ⌃⌥Space the next arrangement, ⌃⌥↩ the
+/// focused window the main one, ⌃⌥P it pinned to its place. The desk's other keys are ⌘ ones: CommandKeys.
 enum HotKeys {
     private static var refs: [EventHotKeyRef?] = []
-    private static let keys: [(id: UInt32, key: Int)] = [
-        (1, kVK_UpArrow), (2, kVK_DownArrow), (3, kVK_ANSI_T), (4, kVK_Return), (5, kVK_Space), (6, kVK_LeftArrow), (7, kVK_RightArrow),
-        (8, kVK_ANSI_P),
-    ]
-    /// with ⌘ as well
-    private static let commanded: [(id: UInt32, key: Int)] = [
-        (41, kVK_UpArrow), (42, kVK_DownArrow), (43, kVK_LeftArrow), (44, kVK_RightArrow),
-    ]
-    /// with ⇧ as well
-    private static let shifted: [(id: UInt32, key: Int)] = [
-        (21, kVK_UpArrow), (22, kVK_DownArrow), (23, kVK_LeftArrow), (24, kVK_RightArrow),
-    ]
 
     static func register() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -786,50 +772,22 @@ enum HotKeys {
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
             switch id.id {
-            case 1: Tiler.shared.focus(.up)
-            case 2: Tiler.shared.focus(.down)
-            case 3: Tiler.shared.on.toggle()
             case 4: Tiler.shared.promote()
             case 5: Tiler.shared.nextArrangement()
-            case 6: Tiler.shared.focus(.left)
-            case 7: Tiler.shared.focus(.right)
             case 8: Tiler.shared.togglePin()
-            case 21: Tiler.shared.move(.up)
-            case 22: Tiler.shared.move(.down)
-            case 23: Tiler.shared.move(.left)
-            case 24: Tiler.shared.move(.right)
-            case 41: Tiler.shared.resize(.up)
-            case 42: Tiler.shared.resize(.down)
-            case 43: Tiler.shared.resize(.left)
-            case 44: Tiler.shared.resize(.right)
             case 31: Appearance.toggle()
-            case 32: LiveWallpaper.shared.frozen.toggle()
-            case 33: LockScreen.shared.show()
-            case 34: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
-            case 35: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
-            case 36: Language.toggle()
-            case 37: PlusMarks.on.toggle(); if SettingsPopup.shared.isVisible { SettingsPopup.shared.refresh() }
-            case 51: Desktops.shared.step(-1)
-            case 52: Desktops.shared.step(1)
-            case 53: Desktops.shared.take(-1)
-            case 54: Desktops.shared.take(1)
+            case 32: LiveWallpaper.shared.frozen.toggle(); CommandKeys.refreshSettings()
+            case 38: WallpaperBlur.on.toggle(); CommandKeys.refreshSettings()
             default: break
             }
             return noErr
         }, 1, &spec, nil, nil)
         let modifiers = UInt32(controlKey | optionKey)
-        let all = keys.map { ($0.id, $0.key, modifiers) } + shifted.map { ($0.id, $0.key, modifiers | UInt32(shiftKey)) }
-            + commanded.map { ($0.id, $0.key, modifiers | UInt32(cmdKey)) }
-            + [(UInt32(31), kVK_ANSI_T, UInt32(cmdKey | shiftKey)), (UInt32(32), kVK_ANSI_M, UInt32(cmdKey | shiftKey)),
-               (UInt32(33), kVK_ANSI_L, UInt32(cmdKey | controlKey)),
-               (UInt32(34), kVK_ANSI_Comma, modifiers), (UInt32(35), kVK_ANSI_Slash, modifiers),
-               // ⌃⌥J: English / 日本語
-               (UInt32(36), kVK_ANSI_J, modifiers),
-               // ⌃⌥=: Plus marks on / off
-               (UInt32(37), kVK_ANSI_Equal, modifiers),
-               // ⌥⌘↑ / ↓: the desktop above / below; with ⇧ the window in front goes along
-               (UInt32(51), kVK_UpArrow, UInt32(optionKey | cmdKey)), (UInt32(52), kVK_DownArrow, UInt32(optionKey | cmdKey)),
-               (UInt32(53), kVK_UpArrow, UInt32(optionKey | cmdKey | shiftKey)), (UInt32(54), kVK_DownArrow, UInt32(optionKey | cmdKey | shiftKey))]
+        let shifted = UInt32(cmdKey | shiftKey)
+        let all: [(UInt32, Int, UInt32)] = [
+            (4, kVK_Return, modifiers), (5, kVK_Space, modifiers), (8, kVK_ANSI_P, modifiers),
+            (31, kVK_ANSI_T, shifted), (32, kVK_ANSI_M, shifted), (38, kVK_ANSI_B, shifted),
+        ]
         for (number, key, mods) in all {
             var ref: EventHotKeyRef?
             RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
@@ -839,10 +797,13 @@ enum HotKeys {
     }
 }
 
-/// ⌘ keys, only while one of the Re apps is in front (elsewhere they keep their usual meaning):
-/// ⌘⇧↑ / ⌘⇧↓ wallpapers, ⌘↑ the window fills the screen, ⌘↓ the desk's middle, ⌘1…⌘8 an arrangement,
-/// ⌘0 Almost Full on / off.
-/// Taking a key away from an app needs an event tap, which needs the Accessibility permission.
+/// The desk's ⌘ keys, only while the desk or one of the Re apps is in front (elsewhere they keep their usual
+/// meaning): ⌘, settings, ⌘/ the keys, ⌘L lock screen, ⌘J English / 日本語, ⌘= plus marks, ⌘- flush,
+/// ⌘0 almost full, ⌘. tiling, ⌘1…⌘8 an arrangement; ⌘ arrows the focus to the nearest window, ⌘⌥ arrows
+/// trade places with it, ⌘fn arrows resize it; ⌥↑ / ⌥↓ the desktop above / below, ⌘⌃↑ / ⌘⌃↓ the window
+/// in front taken there; ⌥← / ⌥→ the previous / next wallpaper. While something is being typed, ⌘ and ⌥
+/// arrows stay the text's. Taking a key away from an app needs an event tap, which needs the Accessibility
+/// permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
 
@@ -869,10 +830,19 @@ enum CommandKeys {
         CGEvent.tapEnable(tap: port, enable: true)
     }
 
+    /// a toggle in it changed by a key: the open settings show it
+    static func refreshSettings() {
+        if SettingsPopup.shared.isVisible { SettingsPopup.shared.refresh() }
+    }
+
     private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
 
     /// F, S, D, N with the desk in front: the app of that letter's corner; T: ReTerm
     private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_T: corners[2], kVK_ANSI_N: corners[3]]
+
+    private static let arrows: [Int: Tiler.Direction] = [kVK_UpArrow: .up, kVK_DownArrow: .down, kVK_LeftArrow: .left, kVK_RightArrow: .right]
+    /// fn with an arrow: Page Up / Page Down / Home / End
+    private static let fnArrows: [Int: Tiler.Direction] = [kVK_PageUp: .up, kVK_PageDown: .down, kVK_Home: .left, kVK_End: .right]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
     /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
@@ -893,6 +863,20 @@ enum CommandKeys {
         return desk
     }
 
+    /// the desk or a Re app in front: the desk's ⌘ keys are taken
+    private static func oursInFront() -> Bool {
+        tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") || deskInFront()
+    }
+
+    /// something being typed in the app in front (a text field or area has the focus)
+    private static func typing() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+        let app = AXUIElementCreateApplication(front.processIdentifier)
+        guard let focused = attribute(app, kAXFocusedUIElementAttribute),
+              let role = attribute(focused as! AXUIElement, kAXRoleAttribute) as? String else { return false }
+        return role == kAXTextFieldRole || role == kAXTextAreaRole || role == kAXComboBoxRole
+    }
+
     private static func log(_ line: String) {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ReDesk/Keys.log")
@@ -906,28 +890,54 @@ enum CommandKeys {
 
     private static func action(for event: CGEvent) -> (() -> Void)? {
         let flags = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
-        if flags.isEmpty, let corner = letters[Int(event.getIntegerValueField(.keyboardEventKeycode))],
+        let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        if flags.isEmpty, let corner = letters[key],
            event.getIntegerValueField(.keyboardEventAutorepeat) == 0, deskInFront() {
             return { ReDesk.open(corner) }
         }
-        guard flags.contains(.maskCommand),
-              tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") else { return nil }
-        let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
-        let arrow = key == kVK_UpArrow ? 1 : key == kVK_DownArrow ? -1 : 0
-        if flags == [.maskCommand, .maskShift], arrow != 0 {
-            return { Wallpapers.step(-arrow) }
+        // the key's action, if it is one of the desk's; `text`: a key that is the text's while typing
+        var text = false
+        let act: (() -> Void)?
+        if flags == .maskCommand, let way = arrows[key] {
+            text = true
+            act = { Tiler.shared.focus(way) }
+        } else if flags == [.maskCommand, .maskAlternate], let way = arrows[key] {
+            act = { Tiler.shared.move(way) }
+        } else if flags == .maskCommand, let way = fnArrows[key] {
+            act = { Tiler.shared.resize(way) }
+        } else if flags == .maskAlternate, let way = arrows[key] {
+            text = true
+            switch way {
+            case .up: act = { Desktops.shared.step(-1) }
+            case .down: act = { Desktops.shared.step(1) }
+            case .left: act = { Wallpapers.step(-1) }
+            case .right: act = { Wallpapers.step(1) }
+            }
+        } else if flags == [.maskCommand, .maskControl], key == kVK_UpArrow || key == kVK_DownArrow {
+            act = { Desktops.shared.take(key == kVK_UpArrow ? -1 : 1) }
+        } else if flags == .maskCommand {
+            switch key {
+            case kVK_ANSI_Comma: act = { KeysPopup.shared.close(); SettingsPopup.shared.toggle() }
+            case kVK_ANSI_Slash: act = { SettingsPopup.shared.close(); KeysPopup.shared.toggle() }
+            case kVK_ANSI_L: act = { LockScreen.shared.show() }
+            case kVK_ANSI_J: act = { Language.toggle() }
+            case kVK_ANSI_Equal: act = { PlusMarks.on.toggle(); refreshSettings() }
+            case kVK_ANSI_Minus: act = { Tiler.shared.flush.toggle(); refreshSettings() }
+            case kVK_ANSI_0: act = { Tiler.shared.almostFull.toggle(); refreshSettings() }
+            case kVK_ANSI_Period: act = { Tiler.shared.on.toggle(); refreshSettings() }
+            default:
+                // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
+                if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
+                    act = { Tiler.shared.choose(Arrangement.allCases[number]) }
+                } else {
+                    act = nil
+                }
+            }
+        } else {
+            act = nil
         }
-        guard flags == .maskCommand else { return nil }
-        // ⌘0: Almost Full on / off
-        if key == kVK_ANSI_0 { return { Tiler.shared.almostFull.toggle() } }
-        // ⌘9: Flush on / off
-        if key == kVK_ANSI_9 { return { Tiler.shared.flush.toggle() } }
-        // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
-        if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
-            return { Tiler.shared.choose(Arrangement.allCases[number]) }
-        }
-        guard arrow != 0 else { return nil }
-        return { Tiler.shared.resizeFocused(wholeScreen: arrow > 0) }
+        guard let act, oursInFront(), !(text && typing()) else { return nil }
+        return act
     }
 }
 
@@ -1264,7 +1274,7 @@ final class Tiler {
         }
     }
 
-    /// Flush (⌘9): no room between the windows, and only the outer corners of them all rounded, as one window
+    /// Flush (⌘-): no room between the windows, and only the outer corners of them all rounded, as one window
     var flush = UserDefaults.standard.bool(forKey: "flushTiles") {
         didSet {
             UserDefaults.standard.set(flush, forKey: "flushTiles")
@@ -1584,7 +1594,7 @@ final class Tiler {
         }
     }
 
-    /// ⌃⌥⌘ arrows: the border between the focused window and its neighbour moves that way by a step, so
+    /// ⌘fn arrows: the border between the focused window and its neighbour moves that way by a step, so
     /// the window grows toward a neighbour and shrinks away from it, wherever it stands. The border is the
     /// one on the right (below), or the left (above) when there is no neighbour on the right (below).
     func resize(_ direction: Direction) {
@@ -1721,7 +1731,7 @@ final class Tiler {
         return openWindows().contains(window) ? window : nil
     }
 
-    /// ⌃⌥ arrows: the focus goes to the nearest window that way. In One at a Time (all in one place)
+    /// ⌘ arrows: the focus goes to the nearest window that way. In One at a Time (all in one place)
     /// ← / ↑ and → / ↓ go back and forth through them.
     func focus(_ direction: Direction) {
         guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
@@ -1731,7 +1741,7 @@ final class Tiler {
         raise(target)
     }
 
-    /// ⌃⌥⇧ arrows: the focused window trades places with the nearest one that way, and keeps the focus.
+    /// ⌘⌥ arrows: the focused window trades places with the nearest one that way, and keeps the focus.
     /// In One at a Time it moves back or forth in the turn.
     func move(_ direction: Direction) {
         guard on, AXIsProcessTrusted(), let current = focusedWindow(),
@@ -2315,7 +2325,7 @@ final class DayView: DeskView {
 @_silgen_name("_AXUIElementGetWindow")
 private func _AXUIElementGetWindow(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
 
-/// ReDesk's own desktops, one above another (⌥⌘↑ / ⌥⌘↓; with ⇧ the window in front goes along). Each window
+/// ReDesk's own desktops, one above another (⌥↑ / ⌥↓; ⌘⌃↑ / ⌘⌃↓ take the window in front along). Each window
 /// of the Re apps is on one of them, on its own (two windows of one app can be on two desktops); the windows
 /// of the others are out of sight (their app puts them away when asked: "hide-window <pid> <number>", and
 /// back, "show-window …"), and tiling lays out only this one's. As many as are used, and an empty one under
@@ -2441,14 +2451,14 @@ final class Desktops {
         }
     }
 
-    /// ⌥⌘↑ / ⌥⌘↓: the desktop above or below
+    /// ⌥↑ / ⌥↓: the desktop above or below
     func step(_ by: Int) {
         let to = current + by
         guard to >= 0, to < count else { return }
         go(to: to)
     }
 
-    /// ⌥⌘⇧↑ / ⌥⌘⇧↓: the window in front (only it, not its app's others) to the desktop above or below, and there with it
+    /// ⌘⌃↑ / ⌘⌃↓: the window in front (only it, not its app's others) to the desktop above or below, and there with it
     func take(_ by: Int) {
         guard let app = NSWorkspace.shared.frontmostApplication, tiledApps.contains(app.bundleIdentifier ?? ""),
               let focused = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedWindowAttribute),
@@ -3215,7 +3225,7 @@ enum YouTubeWallpaper {
 }
 
 // ── the lock screen ──
-// ⌃⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
+// ⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
 // (a video one moving) — until Touch ID or the Mac's password
 // says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
 // still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
@@ -3373,7 +3383,7 @@ final class LockScreen {
 
     var shown: Bool { !windows.isEmpty }
 
-    /// minutes with nothing touched before it comes (0: only ⌃⌘L)
+    /// minutes with nothing touched before it comes (0: only ⌘L)
     var idleMinutes: Double {
         UserDefaults.standard.object(forKey: "lockAfterMinutes") as? Double ?? 5
     }
@@ -4336,7 +4346,7 @@ final class Snap {
     }
 }
 
-// ── the two popups: Settings (⌃⌥, or a right click) and Keys (⌃⌥/), every Re app's keys ──
+// ── the two popups: Settings (⌘, or a right click) and Keys (⌘/), every Re app's keys ──
 
 /// The Re apps' popups (as their INFO on glass): a darker frosted pane and a line round it, in the middle of
 /// the screen, everything else blurred behind; the heading in Noto Sans JP spaced wide, the words in M PLUS 1p. Esc, the same keys again, or a click beside it closes it.
@@ -4608,7 +4618,7 @@ final class SettingsPopup: Popup {
             if isRight { right = views } else { left = views }
         }
 
-        var desk: [NSView] = [toggleRow("Tile windows", Tiler.shared.on, note: "⌃⌥T") { Tiler.shared.on = $0 }]
+        var desk: [NSView] = [toggleRow("Tile windows", Tiler.shared.on, note: "⌘.") { Tiler.shared.on = $0 }]
         if Tiler.shared.on && !AXIsProcessTrusted() {
             desk.append(buttonRow("Tiling needs Accessibility", "Allow", indent: 18) { Tiler.openAccessibilitySettings() })
         }
@@ -4616,11 +4626,11 @@ final class SettingsPopup: Popup {
         desk.append(choiceRow("Arrangement", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0,
                               indent: 18, note: "⌘1…⌘8") { Tiler.shared.choose(arrangements[$0]) })
         desk.append(toggleRow("Almost full", Tiler.shared.almostFull, indent: 18, note: "⌘0") { Tiler.shared.almostFull = $0 })
-        desk.append(toggleRow("Flush", Tiler.shared.flush, indent: 18, note: "⌘9") { Tiler.shared.flush = $0 })
+        desk.append(toggleRow("Flush", Tiler.shared.flush, indent: 18, note: "⌘-") { Tiler.shared.flush = $0 })
         desk += [
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
-            toggleRow("Plus marks", PlusMarks.on, note: "⌃⌥=") { PlusMarks.on = $0 },
+            toggleRow("Plus marks", PlusMarks.on, note: "⌘=") { PlusMarks.on = $0 },
             toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {
                     SMAppService.openSystemSettingsLoginItems()
@@ -4640,12 +4650,12 @@ final class SettingsPopup: Popup {
         if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
             wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in self?.close(); YouTubeWallpaper.removeCurrent() })
         }
-        wallpaper.append(toggleRow("Blur wallpaper", WallpaperBlur.on) { WallpaperBlur.on = $0 })
+        wallpaper.append(toggleRow("Blur wallpaper", WallpaperBlur.on, note: "⌘⇧B") { WallpaperBlur.on = $0 })
         wallpaper.append(toggleRow("Video wallpaper stands still", LiveWallpaper.shared.frozen, note: "⌘⇧M") { LiveWallpaper.shared.frozen = $0 })
         section("Wallpaper", wallpaper)
 
         var screen: [NSView] = [
-            buttonRow("Lock screen", "Lock", note: "⌃⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
+            buttonRow("Lock screen", "Lock", note: "⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
             toggleRow("Snap or clap", Snap.shared.on) { Snap.shared.on = $0 },
         ]
         if Snap.shared.on {
@@ -4686,7 +4696,7 @@ final class SettingsPopup: Popup {
         columns.alignment = .top
         columns.distribution = .fillEqually
         columns.spacing = 56
-        let footer = NSStackView(views: [words("⌃⌥, settings  ·  ⌃⌥/ keys", size: 13, alpha: 0.4), NSView(), button("Quit") { _ in NSApp.terminate(nil) }])
+        let footer = NSStackView(views: [words("⌘, settings  ·  ⌘/ keys", size: 13, alpha: 0.4), NSView(), button("Quit") { _ in NSApp.terminate(nil) }])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         let views: [NSView] = [heading("Re:Desk"), divider(), columns, divider(), footer]
@@ -4705,16 +4715,15 @@ final class KeysPopup: Popup {
     typealias Keys = [(String, String)]
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
         ("Re:Desk", [
-            (nil, [("⌃⌥,", "settings"), ("⌃⌥/", "these keys"), ("⌃⌘L", "lock screen"), ("⌘⇧T", "light / dark"), ("⌃⌥J", "English / 日本語"),
-                   ("⌃⌥=", "plus marks on / off"),
-                   ("⌘⇧M", "video wallpaper still / moving")]),
-            ("Windows", [("⌃⌥ ← → ↑ ↓", "focus the nearest window"), ("⌃⌥⇧ ← → ↑ ↓", "trade places with it"),
-                         ("⌃⌥⌘ ← → ↑ ↓", "resize the window"), ("⌃⌥T", "tiling on / off"), ("⌃⌥Space", "next arrangement"),
-                         ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
+            (nil, [("⌘,", "settings"), ("⌘/", "these keys"), ("⌘L", "lock screen"), ("⌘⇧T", "light / dark"), ("⌘J", "English / 日本語"),
+                   ("⌘⇧M", "video wallpaper still / moving"), ("⌘⇧B", "blur the wallpaper on / off")]),
+            ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
+                         ("⌘fn ← → ↑ ↓", "resize the window"), ("⌘=", "plus marks on / off"), ("⌘-", "flush on / off"),
+                         ("⌘0", "almost full on / off"), ("⌘.", "tiling on / off"), ("⌘1 … ⌘8", "an arrangement"),
+                         ("⌃⌥Space", "next arrangement"), ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
-            ("Desktops", [("⌥⌘↑ / ⌥⌘↓", "the desktop above / below"), ("⌥⌘⇧↑ / ⌥⌘⇧↓", "take the window there")]),
-            ("In the Re apps", [("⌘1 … ⌘8", "an arrangement"), ("⌘0", "almost full on / off"), ("⌘9", "flush on / off"), ("⌘↑ / ⌘↓", "fill the screen / the desk"),
-                                ("⌘⇧↑ / ⌘⇧↓", "previous / next wallpaper")]),
+            ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
+                          ("⌥← / ⌥→", "previous / next wallpaper")]),
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
         ("Re:File", [
@@ -4774,7 +4783,7 @@ final class KeysPopup: Popup {
         row.alignment = .top
         row.distribution = .fillEqually
         row.spacing = 44
-        let footer = words("⌃⌥/ or Esc closes  ·  ⌃⌥, settings", size: 13, alpha: 0.4)
+        let footer = words("⌘/ or Esc closes  ·  ⌘, settings", size: 13, alpha: 0.4)
         let all = NSStackView(views: [row, footer])
         all.orientation = .vertical
         all.alignment = .centerX
