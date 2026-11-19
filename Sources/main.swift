@@ -4722,7 +4722,7 @@ final class SettingsPopup: Popup {
 
 /// Keys: every Re app's keys at once, an app to a column.
 final class KeysPopup: Popup {
-    static let shared = KeysPopup(width: 1400)
+    static let shared = KeysPopup(width: 1700)
 
     typealias Keys = [(String, String)]
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
@@ -4759,9 +4759,17 @@ final class KeysPopup: Popup {
             ("Writing", [("⌘B", "highlight"), ("⌘D", "draw"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
             ("Drawing", [("drag", "draw"), ("⌥ drag", "rub out")]),
         ]),
+        ("Re:Term", [
+            (nil, [("⌘N", "new window"), ("⌘⇧T / H / C", "TERM / HOMO / CHAT"), ("⌘⇧F", "the whole window"), ("⌘K", "new conversation"),
+                   ("⌥↑ / ⌥↓", "the conversation above / below")]),
+            ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
+                      ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
+            ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),
+            ("HOMO", [("Enter", "send"), ("⇧Enter", "new line"), ("NEW", "write to someone new")]),
+        ]),
     ]
 
-    override func width(on screen: NSRect) -> CGFloat { min(1500, screen.width - 80) }
+    override func width(on screen: NSRect) -> CGFloat { min(1760, screen.width - 80) }
 
     override func build() -> NSView {
         var columns: [NSView] = []
