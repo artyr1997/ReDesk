@@ -4743,7 +4743,7 @@ final class KeysPopup: Popup {
             ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
                       ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
             ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),
-            ("HOMO", [("Enter", "send"), ("⇧Enter", "new line"), ("NEW", "write to someone new")]),
+            ("HOMO", [("Enter", "send"), ("⇧Enter", "new line"), ("NOVA", "write to someone new")]),
         ]),
     ]
 
