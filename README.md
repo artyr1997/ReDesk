@@ -53,7 +53,7 @@ Around them:
 | ⌃⌥P | anywhere, while tiling | pin the focused window to its place / let it go |
 | F / S / T / N | on the desk (no app in front but ReDesk or Finder's desktop) | ReFile / ReSurf / ReTerm / ReNote |
 
-The ⌘ and ⌥ keys are taken only while the desk or a Re app is in front, so they keep their usual meaning everywhere else; inside the Re apps they are the desk's, but for ⌘ and ⌥ arrows while something is being typed (a text field has the focus), which stay the text's (but in ReTerm, whose line to type always has the focus). They are read with an event tap, which needs the same Accessibility permission as tiling.
+The ⌘ and ⌥ keys are taken only while the desk or a Re app is in front, so they keep their usual meaning everywhere else; inside the Re apps they are the desk's, but for ⌘ and ⌥ arrows while something is being typed (a text field has the focus), which stay the text's (but in ReTerm, whose line to type always has the focus, and ReNote). They are read with an event tap, which needs the same Accessibility permission as tiling.
 
 **Ink cursors**: the Re apps' brush-drawn arrow, I-beam and pointing hand become the whole Mac's cursors (light ink while the Mac is dark; the arrow pure white always, its tip sharp, with a dark rim so it reads on a light screen), set in CoreGraphics' cursor registry the way Mousecape does it; macOS 26 draws the arrow and the I-beam from new names (`…ArrowS`, `…IBeamS`), the old ones are set too for older systems. They go when ReDesk quits, or with right click › Ink Cursors.
 

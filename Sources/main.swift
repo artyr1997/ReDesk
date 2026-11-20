@@ -802,7 +802,7 @@ enum HotKeys {
 /// ⌘0 almost full, ⌘. tiling, ⌘1…⌘8 an arrangement; ⌘ arrows the focus to the nearest window, ⌘⌥ arrows
 /// trade places with it, ⌘fn arrows resize it; ⌥↑ / ⌥↓ the desktop above / below, ⌘⌃↑ / ⌘⌃↓ the window
 /// in front taken there; ⌥← / ⌥→ the previous / next wallpaper. While something is being typed, ⌘ and ⌥
-/// arrows stay the text's (but in ReTerm). Taking a key away from an app needs an event tap, which needs the Accessibility
+/// arrows stay the text's (but in ReTerm and ReNote). Taking a key away from an app needs an event tap, which needs the Accessibility
 /// permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
@@ -868,11 +868,14 @@ enum CommandKeys {
         tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") || deskInFront()
     }
 
-    /// something being typed in the app in front (a text field or area has the focus). Never in ReTerm:
-    /// its line to type has the focus always, so there ⌘ and ⌥ arrows are the desk's.
+    /// the apps where ⌘ and ⌥ arrows are the desk's even while typing: ReTerm (its line to type always has
+    /// the focus) and ReNote
+    private static let deskWhileTyping: Set<String> = ["com.artursavytskyi.reterm", "com.artursavytskyi.renote"]
+
+    /// something being typed in the app in front (a text field or area has the focus); never in ReTerm and ReNote
     private static func typing() -> Bool {
         guard let front = NSWorkspace.shared.frontmostApplication,
-              front.bundleIdentifier != "com.artursavytskyi.reterm" else { return false }
+              !deskWhileTyping.contains(front.bundleIdentifier ?? "") else { return false }
         let app = AXUIElementCreateApplication(front.processIdentifier)
         guard let focused = attribute(app, kAXFocusedUIElementAttribute),
               let role = attribute(focused as! AXUIElement, kAXRoleAttribute) as? String else { return false }
@@ -4744,7 +4747,7 @@ final class KeysPopup: Popup {
         ("Re:Note", [
             ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
                        ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
-            ("A note", [("⌘S", "save"), ("⌥← / ⌥→", "previous / next note"), ("Esc", "back")]),
+            ("A note", [("⌘S", "save"), ("Esc", "back")]),
             ("Writing", [("⌘B", "highlight"), ("⌘D", "draw"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
             ("Drawing", [("drag", "draw"), ("⌥ drag", "rub out")]),
         ]),
