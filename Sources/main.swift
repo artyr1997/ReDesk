@@ -4767,12 +4767,11 @@ final class KeysPopup: Popup {
             ("Drawing", [("drag", "draw"), ("⌥ drag", "rub out")]),
         ]),
         ("Re:Term", [
-            (nil, [("⌘N", "new window"), ("⌘⇧T / H / C", "TERM / HOMO / CHAT"), ("⌘⇧F", "the whole window"), ("⌘K", "new conversation"),
+            (nil, [("⌘N", "new window"), ("⌘⇧T / C", "TERM / CHAT"), ("⌘⇧F", "the whole window"), ("⌘K  NOVA", "new conversation"),
                    ("⇧↑ / ⇧↓", "the conversation above / below")]),
             ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
                       ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
             ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),
-            ("HOMO", [("Enter", "send"), ("⇧Enter", "new line"), ("NOVA", "write to someone new")]),
         ]),
     ]
 
