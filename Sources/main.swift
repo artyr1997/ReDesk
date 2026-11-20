@@ -4738,7 +4738,7 @@ final class KeysPopup: Popup {
             ("View", [("← →  Space", "turn the page"), ("M", "manga"), ("F", "full screen")]),
         ]),
         ("Re:Surf", [
-            (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
+            (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘⇧W", "close tab"), ("⌃Tab", "next tab"), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
                    ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘⇧F", "page fills the window"), ("⌘I", "info")]),
             ("Search", [("← / →", "previous / next page"), ("↑ / ↓  Enter", "choose, open")]),
         ]),
