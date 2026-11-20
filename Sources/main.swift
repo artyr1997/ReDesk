@@ -4739,10 +4739,8 @@ final class KeysPopup: Popup {
         ]),
         ("Re:Surf", [
             (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘W", "close tab"), ("⌃Tab", "next tab"), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
-                   ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘E", "e-ink"), ("⌘I", "info"), ("⌘J", "ReChat")]),
-            ("Search", [("A / I / V", "all / images / videos"), ("F", "the same in Marginalia"), ("← / →", "previous / next page"),
-                        ("↑ / ↓  Enter", "choose, open")]),
-            ("ReChat", [("Enter", "send"), ("⇧Enter", "new line")]),
+                   ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘⇧F", "page fills the window"), ("⌘I", "info")]),
+            ("Search", [("← / →", "previous / next page"), ("↑ / ↓  Enter", "choose, open")]),
         ]),
         ("Re:Note", [
             ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
