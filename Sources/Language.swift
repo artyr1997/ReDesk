@@ -194,7 +194,6 @@ private let japaneseWords: [String: String] = [
     "Claude / Codex": "Claude / Codex",
     "stop the answer": "答えを止める",
     "what was said before": "前に言ったこと",
-    "file / text / view / play": "ファイル / テキスト / 表示 / 再生",
     "all inside": "中身をすべて",
     "new window": "新しいウィンドウ",
     "select": "選ぶ",

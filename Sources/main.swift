@@ -4749,7 +4749,7 @@ final class KeysPopup: Popup {
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
         ("Re:File", [
-            (nil, [("F / T / V / P", "file / text / view / play"), ("⇧Enter  ⇧F…P", "all inside"), ("⌘N", "new window"), ("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
+            (nil, [("⇧Enter  ⇧F…P", "all inside"), ("⌘N", "new window"), ("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
                    ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
             ("Play", [("1 / 2 / 3", "folder / songs / radio"), ("Space", "play / pause"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("K", "keep a station"), ("M", "mini player")]),
             ("View", [("← →  Space", "turn the page"), ("M", "manga"), ("F", "full screen")]),
