@@ -2518,23 +2518,40 @@ final class Desktops {
         normalize()
         // tiling: this desktop's windows to their places (the coming ones glide up into theirs)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { Tiler.shared.lookNow() }
-        // in front: the window taken along, else the app with the biggest window here; on an empty desktop
-        // the desk itself (so F, S, D, N open the apps)
+        // in front: the window taken along, else the biggest here (the same size: the leftmost); on an empty
+        // desktop the desk itself (so F, S, D, N open the apps)
+        let here = current  // after normalize(): the desktops may be counted anew
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            if let kept, let window = self.shown().first(where: { $0.id == kept }) {
-                AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
-                window.app.activate()
-                return
-            }
-            let here = self.shown()
-            if let biggest = here.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
-                AXUIElementPerformAction(biggest.element, kAXRaiseAction as CFString)
-                biggest.app.activate()
-            } else {
-                NSApp.activate(ignoringOtherApps: true)
-            }
+            self.focus(on: here, kept: kept, coming: Set(coming.keys), last: [:], tries: 25)
         }
         NotificationCenter.default.post(name: .desktopsChanged, object: nil)
+    }
+
+    /// The window to have the focus on the desktop just come to, once its windows are there (their apps show
+    /// them a moment later) and stand still in their places (tiling glides them): the one taken along, else
+    /// the biggest; of the same size (within 2%), the leftmost, then the highest. None: the desk itself.
+    private func focus(on desktop: Int, kept: CGWindowID?, coming: Set<CGWindowID>, last: [CGWindowID: NSRect], tries: Int) {
+        guard current == desktop else { return }  // gone on to another meanwhile
+        let here = shown()
+        let frames = Dictionary(here.map { ($0.id, $0.frame) }, uniquingKeysWith: { a, _ in a })
+        let arrived = coming.isSubset(of: Set(frames.keys))
+        if tries > 0 && (!arrived || frames != last) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                self.focus(on: desktop, kept: kept, coming: coming, last: frames, tries: tries - 1)
+            }
+            return
+        }
+        let pick = here.first { $0.id == kept } ?? here.sorted { a, b in
+            let sa = a.frame.width * a.frame.height, sb = b.frame.width * b.frame.height
+            if abs(sa - sb) > 0.02 * max(sa, sb) { return sa > sb }
+            if abs(a.frame.minX - b.frame.minX) > 2 { return a.frame.minX < b.frame.minX }
+            return a.frame.maxY > b.frame.maxY
+        }.first
+        Tiler.log("focus on \(desktop): \(pick.map { String($0.id) } ?? "the desk")")
+        guard let pick else { return NSApp.activate(ignoringOtherApps: true) }
+        AXUIElementPerformAction(pick.element, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(pick.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        pick.app.activate()
     }
 
     /// emptied desktops gone (but the one in sight), the rest counted from 0
