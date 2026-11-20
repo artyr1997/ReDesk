@@ -4653,7 +4653,6 @@ final class SettingsPopup: Popup {
             toggleRow("Ink cursors", InkCursors.on) { InkCursors.on = $0 },
             toggleRow("Dark appearance", Appearance.dark, note: "⌘⇧T") { if $0 != Appearance.dark { Appearance.toggle() } },
             toggleRow("Plus marks", PlusMarks.on, note: "⌘=") { PlusMarks.on = $0 },
-            toggleRow("Clock face", Dial.on) { Dial.on = $0 },
             toggleRow("Open at login", SMAppService.mainApp.status == .enabled) { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {
                     SMAppService.openSystemSettingsLoginItems()
@@ -4899,8 +4898,6 @@ final class Desk: NSObject, NSApplicationDelegate {
         InkCursors.apply()
         // the windows' corners marked with a +, if kept so (Plus.swift)
         PlusMarks.apply()
-        // the screen's edge as a clock's face, if kept so (Dial.swift)
-        Dial.apply()
         // the Re apps' windows opening and closing, drawn under them (Opening.swift)
         Opening.listen()
         // light ink at night: the cursors follow the appearance. The app's own appearance turns the
