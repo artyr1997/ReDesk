@@ -517,13 +517,27 @@ final class LiveWallpaper {
             let over = WallpaperBlur.on ? WallpaperBlur.radius * 2 : 0
             art.frame = base.bounds.insetBy(dx: -over, dy: -over)
             art.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-            if let url, url.pathExtension != "youtube", let still = Crossfade.picture(Wallpapers.still(of: url), for: screen) {
+            let still = url.flatMap { $0.pathExtension != "youtube" ? Crossfade.picture(Wallpapers.still(of: $0), for: screen) : nil }
+            if let still {
                 art.contents = still
                 art.contentsGravity = .resizeAspectFill
                 art.masksToBounds = true
             }
             let video = AVPlayerLayer(player: player)
             video.videoGravity = .resizeAspectFill
+            // a film with its black bars in the picture (a letterbox, baked in): drawn larger, so the bars are
+            // off the screen and the picture alone fills it
+            if let still, let crop = Letterbox.content(of: still) {
+                let area = art.frame
+                let vw = CGFloat(still.width), vh = CGFloat(still.height)
+                let s = max(area.width / (crop.width * vw), area.height / (crop.height * vh))
+                let fw = vw * s, fh = vh * s
+                // the picture's middle on the screen's (the layer counts up from the bottom, the crop down from the top)
+                art.frame = CGRect(x: area.midX - crop.midX * fw, y: area.midY - (1 - crop.midY) * fh, width: fw, height: fh)
+                art.autoresizingMask = []
+                art.contentsGravity = .resize
+                video.videoGravity = .resize
+            }
             video.frame = art.bounds
             video.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             art.addSublayer(video)
@@ -537,6 +551,34 @@ final class LiveWallpaper {
             window.orderFront(nil)
             return window
         }
+    }
+}
+
+/// Black bars baked into a video's picture, over and under it (a film's letterbox): found in its still.
+enum Letterbox {
+    /// the part of the picture between the bars, as a share of it, from its top left; nil without bars (a dark
+    /// picture, or dark at its edges, has none: the bars are black, the same over and under)
+    static func content(of image: CGImage) -> CGRect? {
+        let w = 192, h = max(1, Int((Double(image.height) / Double(image.width) * 192).rounded()))
+        var px = [UInt8](repeating: 0, count: w * h)
+        let found: CGRect? = px.withUnsafeMutableBytes { raw in
+            guard let c = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                    space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+            c.interpolationQuality = .medium
+            c.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            let p = raw.bindMemory(to: UInt8.self)
+            // the memory's first row is the picture's top
+            func row(_ y: Int) -> Bool { (0..<w).allSatisfy { p[y * w + $0] < 12 } }
+            var top = 0, bottom = h
+            while top < h && row(top) { top += 1 }
+            while bottom > top && row(bottom - 1) { bottom -= 1 }
+            guard bottom - top >= h / 2, top >= 2, abs(top - (h - bottom)) <= 2 else { return nil }
+            // a row further in: the bars' soft edge goes too
+            top += 1
+            bottom -= 1
+            return CGRect(x: 0, y: Double(top) / Double(h), width: 1, height: Double(bottom - top) / Double(h))
+        }
+        return found
     }
 }
 
