@@ -802,7 +802,7 @@ enum HotKeys {
 /// ⌘0 almost full, ⌘. tiling, ⌘1…⌘8 an arrangement; ⌘ arrows the focus to the nearest window, ⌘⌥ arrows
 /// trade places with it, ⌘fn arrows resize it; ⌥↑ / ⌥↓ the desktop above / below, ⌘⌃↑ / ⌘⌃↓ the window
 /// in front taken there; ⌥← / ⌥→ the previous / next wallpaper. While something is being typed, ⌘ and ⌥
-/// arrows stay the text's. Taking a key away from an app needs an event tap, which needs the Accessibility
+/// arrows stay the text's (but in ReTerm). Taking a key away from an app needs an event tap, which needs the Accessibility
 /// permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
@@ -868,9 +868,11 @@ enum CommandKeys {
         tiledApps.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") || deskInFront()
     }
 
-    /// something being typed in the app in front (a text field or area has the focus)
+    /// something being typed in the app in front (a text field or area has the focus). Never in ReTerm:
+    /// its line to type has the focus always, so there ⌘ and ⌥ arrows are the desk's.
     private static func typing() -> Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication else { return false }
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.bundleIdentifier != "com.artursavytskyi.reterm" else { return false }
         let app = AXUIElementCreateApplication(front.processIdentifier)
         guard let focused = attribute(app, kAXFocusedUIElementAttribute),
               let role = attribute(focused as! AXUIElement, kAXRoleAttribute) as? String else { return false }
