@@ -119,14 +119,32 @@ enum Wallpapers {
         return folder
     }()
     private(set) static var youtube = youtubeVideos()
+
+    /// Pictures and videos added from ReFile (Edit › Add to wallpapers), copied into Application
+    /// Support/ReDesk/Added: in both appearances, after the folder's own, oldest first.
+    static let addedFolder: URL = {
+        let folder = stills.appendingPathComponent("Added", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+    private(set) static var added = addedFiles()
+    private static func addedFiles() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: addedFolder, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        func made(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
+        return files.filter { (pictures + videos).contains($0.pathExtension.lowercased()) }.sorted { made($0) < made($1) }
+    }
+
+    /// one of these can go again (Settings › This wallpaper › Remove); the folder's own can't
+    static func removable(_ url: URL) -> Bool { youtube.contains(url) || added.contains(url) }
     private static func youtubeVideos() -> [URL] {
         let files = (try? FileManager.default.contentsOfDirectory(at: youtubeFolder, includingPropertiesForKeys: [.creationDateKey])) ?? []
         func made(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
         return files.filter { videos.contains($0.pathExtension.lowercased()) }.sorted { made($0) < made($1) }
     }
-    /// Looks at the YouTube folder again (a video came or went), and lays the dots out again.
+    /// Looks at the YouTube and Added folders again (a video came or went), and lays the dots out again.
     static func reload() {
         youtube = youtubeVideos()
+        added = addedFiles()
         NotificationCenter.default.post(name: .wallpapersListed, object: nil)
     }
 
@@ -134,7 +152,7 @@ enum Wallpapers {
     /// then those from YouTube.
     static var all: [URL] {
         let (mine, other) = Appearance.dark ? (dark, light) : (light, dark)
-        return (mine.isEmpty ? other : mine) + youtube
+        return (mine.isEmpty ? other : mine) + added + youtube
     }
 
     /// the wallpaper last chosen in each appearance
@@ -3237,7 +3255,7 @@ enum YouTubeWallpaper {
     static func removeCurrent() {
         guard let index = Wallpapers.current else { return }
         let url = Wallpapers.all[index]
-        guard Wallpapers.youtube.contains(url) else { return }
+        guard Wallpapers.removable(url) else { return }
         let count = Wallpapers.all.count
         if count > 1 { Wallpapers.show(index > 0 ? index - 1 : 1) }
         try? FileManager.default.removeItem(at: url)
@@ -4669,7 +4687,7 @@ final class SettingsPopup: Popup {
         } else {
             wallpaper.append(buttonRow("Wallpaper from YouTube", "Add") { [weak self] in self?.close(); YouTubeWallpaper.ask() })
         }
-        if let index = Wallpapers.current, Wallpapers.youtube.contains(Wallpapers.all[index]) {
+        if let index = Wallpapers.current, Wallpapers.removable(Wallpapers.all[index]) {
             wallpaper.append(buttonRow("This wallpaper", "Remove") { [weak self] in self?.close(); YouTubeWallpaper.removeCurrent() })
         }
         wallpaper.append(toggleRow("Blur wallpaper", WallpaperBlur.on, note: "⌘⇧B") { WallpaperBlur.on = $0 })
@@ -4900,6 +4918,10 @@ final class Desk: NSObject, NSApplicationDelegate {
         PlusMarks.apply()
         // the Re apps' windows opening and closing, drawn under them (Opening.swift)
         Opening.listen()
+        // a picture or a video added from ReFile (Edit › Add to wallpapers): among the wallpapers at once
+        DistributedNotificationCenter.default().addObserver(forName: .init("com.artursavytskyi.redesk.wallpapers"), object: nil, queue: .main) { _ in
+            Wallpapers.reload()
+        }
         // light ink at night: the cursors follow the appearance. The app's own appearance turns the
         // moment the Mac's does, together with the other apps; the notice is a second way to hear of it.
         night = Appearance.dark
