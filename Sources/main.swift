@@ -2248,12 +2248,15 @@ final class WallpaperView: DeskView {
 
     private var chosen = Wallpapers.current
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    /// `mirror`: the same dashes on another screen, only showing (and choosing) what the main one keeps in step
+    init(mirror: Bool = false) {
+        super.init(frame: .zero)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: .wallpaperChanged, object: nil)
         // the wallpaper can also change in System Settings
-        DistributedNotificationCenter.default().addObserver(
-            self, selector: #selector(changedElsewhere), name: Notification.Name("com.apple.desktop"), object: nil)
+        if !mirror {
+            DistributedNotificationCenter.default().addObserver(
+                self, selector: #selector(changedElsewhere), name: Notification.Name("com.apple.desktop"), object: nil)
+        }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -4867,25 +4870,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         main.addItem(editItem)
         NSApp.mainMenu = main
 
-        windows = corners.map { corner in
-            DeskWindow(view: WordView(corner: corner)) { l in
-                let height = CGFloat(corner.word.count) * letterStep
-                let x = (corner.left ? l.leftX : l.rightX) - columnWidth / 2
-                let y = corner.top ? l.topWord - height : l.bottomWord
-                return NSRect(x: x, y: y, width: columnWidth, height: height)
-            }
-        }
-        // the wallpapers across the top, where the day's line was (the day is out for now)
-        // the wallpapers on the right edge, around its middle, as the desktops on the left
-        windows.append(DeskWindow(view: wallpapers) { l in
-            let height = WallpaperView.spacing * CGFloat(max(Wallpapers.all.count, 1) + 1)
-            return NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
-        })
-        // the desktops on the left edge, around its middle (room for eight)
-        windows.append(DeskWindow(view: DesktopsView()) { l in
-            let height = DesktopsView.spacing * 8
-            return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
-        })
+        windows = Self.pieces(wallpapers: wallpapers)
         // the day line's twin at the bottom, between PLAY and NOTE; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
             let width = l.area.width * 0.24
@@ -4956,7 +4941,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         Wallpapers.appearanceChanged()
         layout()
         // the ink turns with it (where there's no wallpaper to look at)
-        windows.forEach { $0.redrawFading() }
+        allPieces.forEach { $0.redrawFading() }
         stripWindow.redrawFading()
         // an open popup turns with it
         for popup in [SettingsPopup.shared, KeysPopup.shared] as [Popup] where popup.isVisible { popup.refresh() }
@@ -4976,14 +4961,49 @@ final class Desk: NSObject, NSApplicationDelegate {
     }
 
     private func redrawWords() {
-        windows.forEach { $0.contentView?.subviews.forEach { $0.needsDisplay = true }; $0.contentView?.needsDisplay = true }
+        allPieces.forEach { $0.contentView?.subviews.forEach { $0.needsDisplay = true }; $0.contentView?.needsDisplay = true }
         stripWindow.contentView?.needsDisplay = true
         AppMenuBar.shared.redraw()
     }
 
+    /// The desk's words and dashes for one screen: the four corner words, the wallpapers on the right edge,
+    /// the desktops on the left.
+    private static func pieces(wallpapers: WallpaperView) -> [DeskWindow] {
+        var pieces = corners.map { corner in
+            DeskWindow(view: WordView(corner: corner)) { l in
+                let height = CGFloat(corner.word.count) * letterStep
+                let x = (corner.left ? l.leftX : l.rightX) - columnWidth / 2
+                let y = corner.top ? l.topWord - height : l.bottomWord
+                return NSRect(x: x, y: y, width: columnWidth, height: height)
+            }
+        }
+        // the wallpapers on the right edge, around its middle, as the desktops on the left
+        pieces.append(DeskWindow(view: wallpapers) { l in
+            let height = WallpaperView.spacing * CGFloat(max(Wallpapers.all.count, 1) + 1)
+            return NSRect(x: l.rightX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
+        })
+        // the desktops on the left edge, around its middle (room for eight)
+        pieces.append(DeskWindow(view: DesktopsView()) { l in
+            let height = DesktopsView.spacing * 8
+            return NSRect(x: l.leftX - columnWidth / 2, y: l.area.midY - height / 2, width: columnWidth, height: height)
+        })
+        return pieces
+    }
+
+    /// The same words and dashes on every other screen (an external display), one set each.
+    private var others: [[DeskWindow]] = []
+    /// every piece of the desk, on all the screens
+    private var allPieces: [DeskWindow] { windows + others.flatMap { $0 } }
+
     @objc private func layout() {
         guard let screen = NSScreen.screens.first else { return }
         windows.forEach { $0.place(on: screen) }
+        let extra = Array(NSScreen.screens.dropFirst())
+        if others.count != extra.count {
+            others.flatMap { $0 }.forEach { $0.orderOut(nil) }
+            others = extra.map { _ in Self.pieces(wallpapers: WallpaperView(mirror: true)) }
+        }
+        for (set, screen) in zip(others, extra) { set.forEach { $0.place(on: screen) } }
         showPieces(animated: false)
         LiveWallpaper.shared.layout()
         WallpaperBlur.refresh()
@@ -4995,7 +5015,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     /// Almost Full, where only the apps across the top stay; they fade out and back.
     private func showPieces(animated: Bool = true) {
         let hidden = Tiler.shared.on && Tiler.shared.almostFull
-        for window in windows {
+        for window in allPieces {
             let alpha: CGFloat = hidden ? 0 : 1
             window.ignoresMouseEvents = hidden || window.contentView === wave
             guard window.alphaValue != alpha else { continue }
