@@ -3389,7 +3389,7 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// A life of 90 years as a line like the day's on the desk, MEMENTO MORI down over it: filled as far as lived, a mark at
+    /// A life of 90 years as a line like the day's on the desk, MORI down over it: filled as far as lived, a mark at
     /// its middle (45). Without a birthday, nothing filled.
     private func drawLife() {
         let width = bounds.width * 0.24
@@ -3401,9 +3401,8 @@ final class LockFace: NSView {
         drawBar(in: NSRect(x: line.minX, y: line.midY - barWidth / 2, width: line.width, height: barWidth), filled: gone, vertical: false)
         strong.setFill()
         NSRect(x: line.midX - 0.75, y: line.minY, width: 1.5, height: line.height).fill()
-        // MEMENTO MORI over it, down the screen as the desk's words and the apps' side buttons: a letter to a step,
-        // a step left empty between the words
-        let words = tr("MEMENTO MORI")
+        // MORI over it, down the screen as the desk's words and the apps' side buttons: a letter to a step
+        let words = tr("MORI")
         let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: ink(0.5)]
         let bottom = line.maxY + 24
         for (i, letter) in words.reversed().enumerated() where letter != " " {
