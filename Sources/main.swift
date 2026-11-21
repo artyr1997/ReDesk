@@ -3450,6 +3450,20 @@ final class LockScreen {
             self?.systemLocked = false
             self?.hide()
         }
+        // the screens changed under it (the lid shut or opened, a display in or out): made again for the
+        // screens there are now, never a dark window left without its face
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.shown else { return }
+            let before = self.before
+            self.windows.forEach { $0.orderOut(nil) }
+            self.touch?.invalidate()
+            self.touch = nil
+            self.touchView = nil
+            self.windows = []
+            self.faces = []
+            self.show()
+            self.before = before
+        }
     }
 
     private func check() {
@@ -3612,8 +3626,9 @@ final class LockScreen {
 /// The screen's brightness follows the lid: open (from about 100°) it is the brightness the user chose,
 /// closing it dims the screen down to nearly dark at 20°. The angle comes from the hinge's sensor (a HID
 /// sensor of Apple's, 0x05AC:0x8104, on the MacBooks that have one), the brightness goes through
-/// DisplayServices; neither is public. Set by hand (the keys, Control Center, auto-brightness), the
-/// brightness becomes the new open one.
+/// DisplayServices; neither is public. Set by hand (the keys, Control Center, auto-brightness) with the lid
+/// well open, the brightness becomes the new open one. Shut, asleep or on an external display, the screen
+/// is given its brightness back first, and nothing read from a screen just woken counts.
 final class LidLight {
     static let shared = LidLight()
 
@@ -3664,17 +3679,47 @@ final class LidLight {
         return Double(Int(report[1]) | Int(report[2]) << 8)
     }
 
-    private var display: CGDirectDisplayID {
+    /// the MacBook's own screen, while it is on (none with the lid shut on an external display)
+    private var builtin: CGDirectDisplayID? {
         var ids = [CGDirectDisplayID](repeating: 0, count: 8)
         var count: UInt32 = 0
         CGGetOnlineDisplayList(8, &ids, &count)
-        return ids.prefix(Int(count)).first { CGDisplayIsBuiltin($0) != 0 } ?? CGMainDisplayID()
+        return ids.prefix(Int(count)).first { CGDisplayIsBuiltin($0) != 0 && CGDisplayIsActive($0) != 0 }
     }
 
-    private func brightness() -> Float? {
+    private func brightness(_ display: CGDirectDisplayID) -> Float? {
         var value: Float = 0
         guard let getBrightness, getBrightness(display, &value) == 0 else { return nil }
         return value
+    }
+
+    /// The brightness with the lid open, kept across sleeps and launches: never guessed from a screen just
+    /// woken (it says 0 then, or the dim it was closed at), never below a tenth, so the screen can't be left dark.
+    private static let floor: Float = 0.1
+    private var kept: Float? {
+        get { (UserDefaults.standard.object(forKey: "lidLightBase") as? Double).map { Float($0) } }
+        set { UserDefaults.standard.set(newValue.map { Double($0) }, forKey: "lidLightBase") }
+    }
+    /// no reading nor setting until then: the screen just woke, came back or changed
+    private var quietUntil = Date.distantPast
+    /// the lid shut (or the MacBook's screen off): the brightness given back, nothing done until it opens
+    private var closed = false
+    private var watching = false
+
+    /// Wake, the screens changing (the lid shut on an external display, the cable out): wait a moment, then
+    /// begin again from the brightness kept.
+    private func settle() {
+        quietUntil = Date().addingTimeInterval(2.5)
+        smooth = nil
+        shown = nil
+    }
+
+    /// The user's brightness back on the MacBook's screen.
+    private func giveBack() {
+        guard let base, let setBrightness, let display = builtin else { return }
+        _ = setBrightness(display, base)
+        shown = base
+        setAt = Date()
     }
 
     /// how much of the open brightness at this angle: 0 at 20°, all of it from 100°, eased between
@@ -3687,7 +3732,22 @@ final class LidLight {
         guard on, timer == nil, open() else { return }
         smooth = nil
         shown = nil
-        base = nil
+        base = kept.map { max(Self.floor, $0) }
+        closed = false
+        if !watching {
+            watching = true
+            let workspace = NSWorkspace.shared.notificationCenter
+            // going to sleep: the brightness given back first, so the screen wakes as it was
+            for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+                workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.giveBack(); self?.settle() }
+            }
+            for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+                workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.settle() }
+            }
+            NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.settle()
+            }
+        }
         pace(fast: false)
     }
 
@@ -3695,8 +3755,7 @@ final class LidLight {
         timer?.invalidate()
         timer = nil
         // the user's brightness back
-        if let base, let setBrightness { _ = setBrightness(display, base) }
-        base = nil
+        giveBack()
     }
 
     /// 60 times a second while the lid or the brightness moves, 10 while all is still
@@ -3717,17 +3776,43 @@ final class LidLight {
     private var stillSince = Date()
 
     private func step() {
-        guard let angle = angle(), let now = brightness() else { return }
+        guard Date() >= quietUntil else { return }
+        // the lid shut on an external display: the MacBook's screen is off, nothing to do
+        guard let display = builtin, CGDisplayIsAsleep(display) == 0 else {
+            closed = true
+            smooth = nil
+            shown = nil
+            return
+        }
+        guard let angle = angle(), let now = brightness(display) else { return }
+        // all but shut: the brightness given back now, so the screen comes back as it was when it opens
+        if angle < 8 {
+            if !closed { giveBack() }
+            closed = true
+            smooth = nil
+            return
+        }
+        if closed {
+            closed = false
+            smooth = nil
+            shown = nil
+        }
         let eased = smooth.map { $0 + (angle - $0) * 0.18 } ?? angle
         smooth = eased
         let share = share(eased)
         if base == nil {
-            base = share > 0.25 ? min(1, now / share) : now
-            shown = now
-        } else if let shown, abs(shown - now) > 0.02, Date().timeIntervalSince(setAt) > 1,
-                  share > 0.25, CGDisplayIsAsleep(display) == 0 {
-            // changed by something else (and not mid-way through a change of ours): what the user wants
+            // the first time ever: what the screen shows with the lid well open
+            guard share > 0.9, now >= Self.floor else { return }
             base = min(1, now / share)
+            kept = base
+        }
+        if shown == nil {
+            shown = now
+            setAt = Date()
+        } else if let shown, abs(shown - now) > 0.02, Date().timeIntervalSince(setAt) > 1, share > 0.9 {
+            // changed by the user (the brightness keys), with the lid open: what they want, but never dark
+            base = max(Self.floor, min(1, now / share))
+            kept = base
             self.shown = now
         }
         guard let base, let shown, let setBrightness else { return }
@@ -4881,7 +4966,7 @@ final class Desk: NSObject, NSApplicationDelegate {
 
         layout()
         NotificationCenter.default.addObserver(
-            self, selector: #selector(layout), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+            self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(layout), name: .wallpapersListed, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(languageChanged), name: Language.changed, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -4992,6 +5077,11 @@ final class Desk: NSObject, NSApplicationDelegate {
 
     /// The same words and dashes on every other screen (an external display), one set each.
     private var others: [[DeskWindow]] = []
+    /// the screens they stand on, by number
+    private var otherScreens: [CGDirectDisplayID] = []
+    /// a layout again once the screens have settled: asked for, and being done
+    private var settleAsked = false
+    private var settlingNow = false
     /// every piece of the desk, on all the screens
     private var allPieces: [DeskWindow] { windows + others.flatMap { $0 } }
 
@@ -4999,9 +5089,12 @@ final class Desk: NSObject, NSApplicationDelegate {
         guard let screen = NSScreen.screens.first else { return }
         windows.forEach { $0.place(on: screen) }
         let extra = Array(NSScreen.screens.dropFirst())
-        if others.count != extra.count {
+        let ids = extra.map { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0 }
+        if ids != otherScreens {
+            // other screens than before (the lid shut on a display, the cable out): their sets made anew
             others.flatMap { $0 }.forEach { $0.orderOut(nil) }
             others = extra.map { _ in Self.pieces(wallpapers: WallpaperView(mirror: true)) }
+            otherScreens = ids
         }
         for (set, screen) in zip(others, extra) { set.forEach { $0.place(on: screen) } }
         showPieces(animated: false)
@@ -5009,6 +5102,24 @@ final class Desk: NSObject, NSApplicationDelegate {
         WallpaperBlur.refresh()
         Tiler.shared.retile()
         showBar()
+    }
+
+    /// The screens changed (a display plugged in or out, the lid shut on one): laid out now, and again once
+    /// they have settled, since they tell of a change while it is still under way.
+    @objc private func screensChanged() {
+        layout()
+        if !settlingNow && !settleAsked {
+            settleAsked = true
+            for delay in [0.8, 2.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self else { return }
+                    self.settlingNow = true
+                    self.layout()
+                    self.settlingNow = false
+                    if delay > 1 { self.settleAsked = false }
+                }
+            }
+        }
     }
 
     /// The desk's own pieces (the corner words, the dots, the day line, the wave): gone in
