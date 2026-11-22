@@ -3044,6 +3044,59 @@ final class Meter {
 
 /// While sound plays: three soft sine lines drifting along the bottom, tapering to nothing at
 /// both ends. Their height follows how loud it is; in silence they settle flat and away.
+/// The time as three bars making a triangle, point up, their ends kept apart at its corners: the left side the
+/// day's hours (filling up to the top), the right the hour's minutes (down from the top), the bottom the
+/// minute's seconds (right to left), all three going round as a clock's hands do.
+final class TimeView: NSView {
+    /// each side, and the room round the triangle
+    static let side: CGFloat = 58
+    static let margin: CGFloat = 4
+    /// left open at each corner, each end
+    private let gap: CGFloat = 5
+    private var ticks: Timer?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        // the seconds fill smoothly: twenty times a second, a picture this small costs nothing
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.needsDisplay = true }
+        RunLoop.main.add(timer, forMode: .common)
+        ticks = timer
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let now = Date()
+        let parts = Calendar.current.dateComponents([.hour, .minute, .second, .nanosecond], from: now)
+        let seconds = Double(parts.second ?? 0) + Double(parts.nanosecond ?? 0) / 1e9
+        let minutes = Double(parts.minute ?? 0) + seconds / 60
+        let hours = Double(parts.hour ?? 0) + minutes / 60
+
+        // the corners: the top, the bottom right, the bottom left
+        let s = Self.side, h = s * sqrt(3) / 2
+        let bottom = bounds.midY - h / 2
+        let top = NSPoint(x: bounds.midX, y: bottom + h)
+        let right = NSPoint(x: bounds.midX + s / 2, y: bottom)
+        let left = NSPoint(x: bounds.midX - s / 2, y: bottom)
+        bar(from: left, to: top, filled: hours / 24)
+        bar(from: top, to: right, filled: minutes / 60)
+        bar(from: right, to: left, filled: seconds / 60)
+    }
+
+    /// a bar along one side, short of both corners, filling from `a` towards `b`
+    private func bar(from a: NSPoint, to b: NSPoint, filled: Double) {
+        let dx = b.x - a.x, dy = b.y - a.y
+        let length = hypot(dx, dy)
+        NSGraphicsContext.saveGraphicsState()
+        let turn = NSAffineTransform()
+        turn.translateX(by: a.x, yBy: a.y)
+        turn.rotate(byRadians: atan2(dy, dx))
+        turn.concat()
+        drawBar(in: NSRect(x: gap, y: -barWidth / 2, width: length - 2 * gap, height: barWidth), filled: filled, vertical: false)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 final class WaveView: NSView {
     private let meter = Meter()
     private var playing = false
@@ -5280,6 +5333,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let wallpapers = WallpaperView()
     private let day = DayView()
     private let wave = WaveView()
+    private let time = TimeView()
     private var windows: [DeskWindow] = []
     private let strip = AppStripView()
     /// placed by showStrip(), over the strip the hidden menu bar leaves at the top of the screen
@@ -5304,13 +5358,20 @@ final class Desk: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = main
 
         windows = Self.pieces(wallpapers: wallpapers)
-        // the day line's twin at the bottom, between PLAY and NOTE; only to look at, clicks go through
+        // the wave at the top, between FILE and SURF; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
             let width = l.area.width * 0.24
-            return NSRect(x: l.area.midX - width / 2, y: l.waveLine - 22, width: width, height: 44)
+            return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 22, width: width, height: 44)
         }
         waveWindow.ignoresMouseEvents = true
         windows.append(waveWindow)
+        // the time at the bottom, between TERM and NOTE: three bars making a triangle
+        let timeWindow = DeskWindow(view: time) { l in
+            let side = TimeView.side + 2 * TimeView.margin
+            return NSRect(x: l.area.midX - side / 2, y: l.waveLine - side / 2, width: side, height: side)
+        }
+        timeWindow.ignoresMouseEvents = true
+        windows.append(timeWindow)
 
         layout()
         NotificationCenter.default.addObserver(
@@ -5476,7 +5537,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         let hidden = Tiler.shared.on && Tiler.shared.almostFull
         for window in allPieces {
             let alpha: CGFloat = hidden ? 0 : 1
-            window.ignoresMouseEvents = hidden || window.contentView === wave
+            window.ignoresMouseEvents = hidden || window.contentView === wave || window.contentView === time
             guard window.alphaValue != alpha else { continue }
             if animated {
                 NSAnimationContext.runAnimationGroup { $0.duration = 0.25; window.animator().alphaValue = alpha }
