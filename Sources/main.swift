@@ -780,37 +780,187 @@ extension Notification.Name {
 /// From anywhere (Carbon hot keys need no permissions): ⌘⇧T the Mac between light and dark, ⌘⇧M the video
 /// wallpaper still or moving, ⌘⇧B the wallpaper blurred or not; ⌃⌥Space the next arrangement, ⌃⌥↩ the
 /// focused window the main one, ⌃⌥P it pinned to its place. The desk's other keys are ⌘ ones: CommandKeys.
+/// The desk's keys that work whichever app is in front (the system's hot keys): those of DeskKey that are
+/// `anywhere`, as they are kept; made again when one is changed, put away while one is being set.
 enum HotKeys {
-    private static var refs: [EventHotKeyRef?] = []
+    private static var refs: [EventHotKeyRef] = []
+    private static var installed = false
 
     static func register() {
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
-            var id = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                              nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
-            switch id.id {
-            case 4: Tiler.shared.promote()
-            case 5: Tiler.shared.nextArrangement()
-            case 8: Tiler.shared.togglePin()
-            case 31: Appearance.toggle()
-            case 32: LiveWallpaper.shared.frozen.toggle(); CommandKeys.refreshSettings()
-            case 38: WallpaperBlur.on.toggle(); CommandKeys.refreshSettings()
-            default: break
-            }
-            return noErr
-        }, 1, &spec, nil, nil)
-        let modifiers = UInt32(controlKey | optionKey)
-        let shifted = UInt32(cmdKey | shiftKey)
-        let all: [(UInt32, Int, UInt32)] = [
-            (4, kVK_Return, modifiers), (5, kVK_Space, modifiers), (8, kVK_ANSI_P, modifiers),
-            (31, kVK_ANSI_T, shifted), (32, kVK_ANSI_M, shifted), (38, kVK_ANSI_B, shifted),
-        ]
-        for (number, key, mods) in all {
+        if !installed {
+            installed = true
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var id = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                  nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
+                let all = DeskKey.allCases
+                if id.id >= 100, Int(id.id) - 100 < all.count { all[Int(id.id) - 100].run() }
+                return noErr
+            }, 1, &spec, nil, nil)
+        }
+        pause()
+        for (i, key) in DeskKey.allCases.enumerated() where key.anywhere {
+            let shortcut = key.shortcut
             var ref: EventHotKeyRef?
-            RegisterEventHotKey(UInt32(key), mods, EventHotKeyID(signature: OSType(0x5244_534B), id: number),
+            RegisterEventHotKey(UInt32(shortcut.key), shortcut.carbonModifiers,
+                                EventHotKeyID(signature: OSType(0x5244_534B), id: UInt32(100 + i)),
                                 GetApplicationEventTarget(), 0, &ref)
-            refs.append(ref)
+            if let ref { refs.append(ref) }
+        }
+    }
+
+    /// none of them for now (a key being set: it must reach the popup)
+    static func pause() {
+        refs.forEach { UnregisterEventHotKey($0) }
+        refs = []
+    }
+}
+
+/// A key with its modifiers (⌘ ⇧ ⌃ ⌥), kept as "key:modifiers".
+struct Shortcut: Equatable {
+    var key: Int
+    var flags: CGEventFlags
+
+    static let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate]
+
+    init(key: Int, flags: CGEventFlags) {
+        self.key = key
+        self.flags = flags.intersection(Self.modifiers)
+    }
+
+    init?(kept: String) {
+        let parts = kept.split(separator: ":").compactMap { UInt64($0) }
+        guard parts.count == 2 else { return nil }
+        self.init(key: Int(parts[0]), flags: CGEventFlags(rawValue: parts[1]))
+    }
+
+    var kept: String { "\(key):\(flags.rawValue)" }
+
+    static func == (a: Shortcut, b: Shortcut) -> Bool { a.key == b.key && a.flags.rawValue == b.flags.rawValue }
+
+    var carbonModifiers: UInt32 {
+        var mods = 0
+        if flags.contains(.maskCommand) { mods |= cmdKey }
+        if flags.contains(.maskShift) { mods |= shiftKey }
+        if flags.contains(.maskControl) { mods |= controlKey }
+        if flags.contains(.maskAlternate) { mods |= optionKey }
+        return UInt32(mods)
+    }
+
+    /// as the popup writes keys: ⌃⌥⌘⇧ and then the key
+    var text: String {
+        var out = ""
+        if flags.contains(.maskControl) { out += "⌃" }
+        if flags.contains(.maskAlternate) { out += "⌥" }
+        if flags.contains(.maskCommand) { out += "⌘" }
+        if flags.contains(.maskShift) { out += "⇧" }
+        return out + (Self.names[key] ?? "#\(key)")
+    }
+
+    /// the keys by where they are on the keyboard (as printed on a US one, whatever the layout)
+    private static let names: [Int: String] = {
+        var names: [Int: String] = [
+            kVK_ANSI_A: "A", kVK_ANSI_B: "B", kVK_ANSI_C: "C", kVK_ANSI_D: "D", kVK_ANSI_E: "E", kVK_ANSI_F: "F",
+            kVK_ANSI_G: "G", kVK_ANSI_H: "H", kVK_ANSI_I: "I", kVK_ANSI_J: "J", kVK_ANSI_K: "K", kVK_ANSI_L: "L",
+            kVK_ANSI_M: "M", kVK_ANSI_N: "N", kVK_ANSI_O: "O", kVK_ANSI_P: "P", kVK_ANSI_Q: "Q", kVK_ANSI_R: "R",
+            kVK_ANSI_S: "S", kVK_ANSI_T: "T", kVK_ANSI_U: "U", kVK_ANSI_V: "V", kVK_ANSI_W: "W", kVK_ANSI_X: "X",
+            kVK_ANSI_Y: "Y", kVK_ANSI_Z: "Z",
+            kVK_ANSI_0: "0", kVK_ANSI_1: "1", kVK_ANSI_2: "2", kVK_ANSI_3: "3", kVK_ANSI_4: "4",
+            kVK_ANSI_5: "5", kVK_ANSI_6: "6", kVK_ANSI_7: "7", kVK_ANSI_8: "8", kVK_ANSI_9: "9",
+            kVK_ANSI_Comma: ",", kVK_ANSI_Period: ".", kVK_ANSI_Slash: "/", kVK_ANSI_Semicolon: ";", kVK_ANSI_Quote: "'",
+            kVK_ANSI_LeftBracket: "[", kVK_ANSI_RightBracket: "]", kVK_ANSI_Backslash: "\\", kVK_ANSI_Minus: "-",
+            kVK_ANSI_Equal: "=", kVK_ANSI_Grave: "`",
+            kVK_Return: "↩", kVK_Space: "Space", kVK_Tab: "⇥", kVK_Delete: "⌫", kVK_ForwardDelete: "⌦", kVK_Escape: "Esc",
+            kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+            kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟",
+        ]
+        let f = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12]
+        for (i, key) in f.enumerated() { names[key] = "F\(i + 1)" }
+        return names
+    }()
+}
+
+/// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
+enum DeskKey: String, CaseIterable {
+    case settings, keys, lock, appearance, language, stillWallpaper, blurWallpaper
+    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin
+
+    /// its line in the popup
+    var title: String {
+        switch self {
+        case .settings: "settings"
+        case .keys: "these keys"
+        case .lock: "lock screen"
+        case .appearance: "light / dark"
+        case .language: "English / 日本語"
+        case .stillWallpaper: "video wallpaper still / moving"
+        case .blurWallpaper: "blur the wallpaper on / off"
+        case .plusMarks: "plus marks on / off"
+        case .flush: "flush on / off"
+        case .almostFull: "almost full on / off"
+        case .tiling: "tiling on / off"
+        case .nextArrangement: "next arrangement"
+        case .promote: "the window becomes the main one"
+        case .pin: "pin the window to its place"
+        }
+    }
+
+    var standard: Shortcut {
+        let cmd: CGEventFlags = .maskCommand, cmdShift: CGEventFlags = [.maskCommand, .maskShift]
+        let ctrlAlt: CGEventFlags = [.maskControl, .maskAlternate]
+        switch self {
+        case .settings: return Shortcut(key: kVK_ANSI_Comma, flags: cmd)
+        case .keys: return Shortcut(key: kVK_ANSI_Slash, flags: cmd)
+        case .lock: return Shortcut(key: kVK_ANSI_L, flags: cmd)
+        case .appearance: return Shortcut(key: kVK_ANSI_T, flags: cmdShift)
+        case .language: return Shortcut(key: kVK_ANSI_J, flags: cmd)
+        case .stillWallpaper: return Shortcut(key: kVK_ANSI_M, flags: cmdShift)
+        case .blurWallpaper: return Shortcut(key: kVK_ANSI_B, flags: cmdShift)
+        case .plusMarks: return Shortcut(key: kVK_ANSI_Equal, flags: cmd)
+        case .flush: return Shortcut(key: kVK_ANSI_Minus, flags: cmd)
+        case .almostFull: return Shortcut(key: kVK_ANSI_0, flags: cmd)
+        case .tiling: return Shortcut(key: kVK_ANSI_Period, flags: cmd)
+        case .nextArrangement: return Shortcut(key: kVK_Space, flags: ctrlAlt)
+        case .promote: return Shortcut(key: kVK_Return, flags: ctrlAlt)
+        case .pin: return Shortcut(key: kVK_ANSI_P, flags: ctrlAlt)
+        }
+    }
+
+    /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
+    var anywhere: Bool {
+        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin].contains(self)
+    }
+
+    var shortcut: Shortcut {
+        get { UserDefaults.standard.string(forKey: "key." + rawValue).flatMap(Shortcut.init(kept:)) ?? standard }
+        nonmutating set {
+            if newValue == standard {
+                UserDefaults.standard.removeObject(forKey: "key." + rawValue)
+            } else {
+                UserDefaults.standard.set(newValue.kept, forKey: "key." + rawValue)
+            }
+        }
+    }
+
+    var changed: Bool { shortcut != standard }
+
+    func run() {
+        switch self {
+        case .settings: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
+        case .keys: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
+        case .lock: LockScreen.shared.show()
+        case .appearance: Appearance.toggle()
+        case .language: Language.toggle()
+        case .stillWallpaper: LiveWallpaper.shared.frozen.toggle(); CommandKeys.refreshSettings()
+        case .blurWallpaper: WallpaperBlur.on.toggle(); CommandKeys.refreshSettings()
+        case .plusMarks: PlusMarks.on.toggle(); CommandKeys.refreshSettings()
+        case .flush: Tiler.shared.flush.toggle(); CommandKeys.refreshSettings()
+        case .almostFull: Tiler.shared.almostFull.toggle(); CommandKeys.refreshSettings()
+        case .tiling: Tiler.shared.on.toggle(); CommandKeys.refreshSettings()
+        case .nextArrangement: Tiler.shared.nextArrangement()
+        case .promote: Tiler.shared.promote()
+        case .pin: Tiler.shared.togglePin()
         }
     }
 }
@@ -824,6 +974,8 @@ enum HotKeys {
 /// permission.
 enum CommandKeys {
     private static var tap: CFMachPort?
+    /// a key being set in the popup: every key goes to it
+    static var recording = false
 
     /// Tries now and again later: the tap can only be made once the permission is given.
     static func install() {
@@ -912,8 +1064,15 @@ enum CommandKeys {
     }
 
     private static func action(for event: CGEvent) -> (() -> Void)? {
+        if recording { return nil }
         let flags = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
         let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        // the desk's own keys, as kept (set in the popup or as they came)
+        let pressed = Shortcut(key: key, flags: flags)
+        if let own = DeskKey.allCases.first(where: { !$0.anywhere && $0.shortcut == pressed }),
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            return oursInFront() ? { own.run() } : nil
+        }
         if flags.isEmpty, let corner = letters[key],
            event.getIntegerValueField(.keyboardEventAutorepeat) == 0, deskInFront() {
             return { ReDesk.open(corner) }
@@ -939,22 +1098,11 @@ enum CommandKeys {
         } else if flags == [.maskCommand, .maskControl], key == kVK_UpArrow || key == kVK_DownArrow {
             act = { Desktops.shared.take(key == kVK_UpArrow ? -1 : 1) }
         } else if flags == .maskCommand {
-            switch key {
-            case kVK_ANSI_Comma: act = { KeysPopup.shared.close(); SettingsPopup.shared.toggle() }
-            case kVK_ANSI_Slash: act = { SettingsPopup.shared.close(); KeysPopup.shared.toggle() }
-            case kVK_ANSI_L: act = { LockScreen.shared.show() }
-            case kVK_ANSI_J: act = { Language.toggle() }
-            case kVK_ANSI_Equal: act = { PlusMarks.on.toggle(); refreshSettings() }
-            case kVK_ANSI_Minus: act = { Tiler.shared.flush.toggle(); refreshSettings() }
-            case kVK_ANSI_0: act = { Tiler.shared.almostFull.toggle(); refreshSettings() }
-            case kVK_ANSI_Period: act = { Tiler.shared.on.toggle(); refreshSettings() }
-            default:
-                // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
-                if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
-                    act = { Tiler.shared.choose(Arrangement.allCases[number]) }
-                } else {
-                    act = nil
-                }
+            // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
+            if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
+                act = { Tiler.shared.choose(Arrangement.allCases[number]) }
+            } else {
+                act = nil
             }
         } else {
             act = nil
@@ -4847,12 +4995,13 @@ final class KeysPopup: Popup {
     typealias Keys = [(String, String)]
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
         ("Re:Desk", [
-            (nil, [("⌘,", "settings"), ("⌘/", "these keys"), ("⌘L", "lock screen"), ("⌘⇧T", "light / dark"), ("⌘J", "English / 日本語"),
-                   ("⌘⇧M", "video wallpaper still / moving"), ("⌘⇧B", "blur the wallpaper on / off")]),
+            // "@name": one of the desk's own keys (DeskKey), written as kept and set by a click
+            (nil, [("@settings", ""), ("@keys", ""), ("@lock", ""), ("@appearance", ""), ("@language", ""),
+                   ("@stillWallpaper", ""), ("@blurWallpaper", "")]),
             ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
-                         ("⌘fn ← → ↑ ↓", "resize the window"), ("⌘=", "plus marks on / off"), ("⌘-", "flush on / off"),
-                         ("⌘0", "almost full on / off"), ("⌘.", "tiling on / off"), ("⌘1 … ⌘8", "an arrangement"),
-                         ("⌃⌥Space", "next arrangement"), ("⌃⌥↩", "the window becomes the main one"), ("⌃⌥P", "pin the window to its place")]),
+                         ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
+                         ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
+                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", "")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
             ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
                           ("⌥← / ⌥→", "previous / next wallpaper")]),
@@ -4887,6 +5036,94 @@ final class KeysPopup: Popup {
 
     override func width(on screen: NSRect) -> CGFloat { min(1760, screen.width - 80) }
 
+    // ── setting a key of one's own ──
+
+    /// the key being set: the next keys pressed (with ⌘, ⌃ or ⌥) become its own
+    private var recording: DeskKey?
+    private var monitor: Any?
+
+    /// one of the desk's keys, as kept: a click and it waits for the new ones; one set otherwise brighter
+    private func setter(_ own: DeskKey) -> NSView {
+        let waiting = recording == own
+        let title = waiting ? tr("press the keys…") : own.shortcut.text
+        let button = NSButton(title: "", target: nil, action: nil)
+        button.isBordered = false
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: Self.noto(11), .kern: 0.55,
+            .foregroundColor: Self.text.withAlphaComponent(waiting || own.changed ? 1 : 0.6),
+            .underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDot.rawValue,
+            .underlineColor: Self.text.withAlphaComponent(waiting ? 0.8 : 0.3),
+        ])
+        let action = act { [weak self] _ in self?.record(own) }
+        button.target = action
+        button.action = #selector(Do.fire(_:))
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return button
+    }
+
+    private func record(_ own: DeskKey) {
+        if recording == own { return stopRecording() }
+        recording = own
+        CommandKeys.recording = true
+        HotKeys.pause()
+        if monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, self.recording != nil else { return event }
+                self.pressed(event)
+                return nil
+            }
+        }
+        refresh()
+    }
+
+    private func pressed(_ event: NSEvent) {
+        guard let own = recording else { return }
+        var flags: CGEventFlags = []
+        if event.modifierFlags.contains(.command) { flags.insert(.maskCommand) }
+        if event.modifierFlags.contains(.shift) { flags.insert(.maskShift) }
+        if event.modifierFlags.contains(.control) { flags.insert(.maskControl) }
+        if event.modifierFlags.contains(.option) { flags.insert(.maskAlternate) }
+        let key = Int(event.keyCode)
+        // Esc: left as it was; ⌫: its own again
+        if flags.isEmpty && key == kVK_Escape { return stopRecording() }
+        if flags.isEmpty && (key == kVK_Delete || key == kVK_ForwardDelete) {
+            take(own.standard, for: own)
+            return stopRecording()
+        }
+        // a key alone (or with ⇧ only) would be taken from whatever is typed: ⌘, ⌃ or ⌥ with it
+        guard !flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty else { return NSSound.beep() }
+        take(Shortcut(key: key, flags: flags), for: own)
+        stopRecording()
+    }
+
+    /// the keys become this one's; another that had them gets this one's old ones (the two trade)
+    private func take(_ shortcut: Shortcut, for own: DeskKey) {
+        if let other = DeskKey.allCases.first(where: { $0 != own && $0.shortcut == shortcut }) {
+            other.shortcut = own.shortcut
+        }
+        own.shortcut = shortcut
+    }
+
+    private func stopRecording() {
+        guard recording != nil || CommandKeys.recording else { return }
+        recording = nil
+        CommandKeys.recording = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        HotKeys.register()
+        if isVisible { refresh() }
+    }
+
+    override func close() {
+        stopRecording()
+        super.close()
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if recording != nil { return stopRecording() }
+        close()
+    }
+
     override func build() -> NSView {
         var columns: [NSView] = []
         for app in Self.apps {
@@ -4894,7 +5131,9 @@ final class KeysPopup: Popup {
             for (name, list) in app.parts {
                 if let name { views.append(caption(name)) }
                 for (key, what) in list {
-                    let line = NSStackView(views: [keys(key), NSView(), words(what, size: 14)])
+                    let own = key.hasPrefix("@") ? DeskKey(rawValue: String(key.dropFirst())) : nil
+                    let left: NSView = own.map(setter) ?? keys(key)
+                    let line = NSStackView(views: [left, NSView(), words(own?.title ?? what, size: 14)])
                     line.orientation = .horizontal
                     line.alignment = .firstBaseline
                     line.spacing = 12
@@ -4912,7 +5151,8 @@ final class KeysPopup: Popup {
         row.alignment = .top
         row.distribution = .fillEqually
         row.spacing = 44
-        let footer = words("⌘/ or Esc closes  ·  ⌘, settings", size: 13, alpha: 0.4)
+        let footer = words("\(DeskKey.keys.shortcut.text) \(tr("or Esc closes"))  ·  \(DeskKey.settings.shortcut.text) \(tr("settings"))  ·  \(tr("click a key of Re:Desk to set your own, ⌫ for its own again"))",
+                           size: 13, alpha: 0.4)
         let all = NSStackView(views: [row, footer])
         all.orientation = .vertical
         all.alignment = .centerX
