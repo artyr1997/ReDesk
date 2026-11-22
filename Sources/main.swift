@@ -5304,10 +5304,10 @@ final class Desk: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = main
 
         windows = Self.pieces(wallpapers: wallpapers)
-        // the wave at the top, between FILE and SURF; only to look at, clicks go through
+        // the wave at the bottom, between TERM and NOTE; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
             let width = l.area.width * 0.24
-            return NSRect(x: l.area.midX - width / 2, y: l.dayLine - 22, width: width, height: 44)
+            return NSRect(x: l.area.midX - width / 2, y: l.waveLine - 22, width: width, height: 44)
         }
         waveWindow.ignoresMouseEvents = true
         windows.append(waveWindow)
