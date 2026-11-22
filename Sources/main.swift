@@ -881,6 +881,110 @@ struct Shortcut: Equatable {
     }()
 }
 
+/// One of a Re app's keys, set in the popup too: kept in Application Support/ReSpace/keys.json, which the app
+/// reads (its OwnKeys) when told (com.artursavytskyi.re.keys).
+struct AppKey: Equatable {
+    let app: String
+    let id: String
+    let title: String
+    let standard: Shortcut
+
+    static func == (a: AppKey, b: AppKey) -> Bool { a.app == b.app && a.id == b.id }
+
+    private static func key(_ app: String, _ id: String, _ title: String, _ key: Int, _ flags: CGEventFlags = .maskCommand) -> AppKey {
+        AppKey(app: app, id: id, title: title, standard: Shortcut(key: key, flags: flags))
+    }
+
+    static let all: [AppKey] = [
+        key("ReFile", "newWindow", "new window", kVK_ANSI_N),
+        key("ReSurf", "newWindow", "new window", kVK_ANSI_N),
+        key("ReSurf", "newTab", "new tab", kVK_ANSI_T),
+        key("ReSurf", "address", "address", kVK_ANSI_L),
+        key("ReSurf", "closeTab", "close tab", kVK_ANSI_W, [.maskCommand, .maskShift]),
+        key("ReSurf", "nextTab", "next tab", kVK_Tab, .maskControl),
+        key("ReSurf", "reload", "reload", kVK_ANSI_R),
+        key("ReSurf", "favourite", "favourite", kVK_ANSI_D),
+        key("ReSurf", "video", "video fills the page", kVK_ANSI_F),
+        key("ReSurf", "pageFull", "page fills the window", kVK_ANSI_F, [.maskCommand, .maskShift]),
+        key("ReSurf", "info", "info", kVK_ANSI_I),
+        key("ReNote", "newWindow", "new window", kVK_ANSI_N),
+        key("ReNote", "save", "save", kVK_ANSI_S),
+        key("ReNote", "highlight", "highlight", kVK_ANSI_B),
+        key("ReNote", "draw", "draw", kVK_ANSI_D),
+        key("ReNote", "undo", "undo", kVK_ANSI_Z),
+        key("ReTerm", "newWindow", "new window", kVK_ANSI_N),
+        key("ReTerm", "wholeWindow", "the whole window", kVK_ANSI_F, [.maskCommand, .maskShift]),
+        key("ReTerm", "newConversation", "new conversation", kVK_ANSI_K),
+    ]
+
+    /// "ReSurf.newTab"
+    static func named(_ name: String) -> AppKey? {
+        let parts = name.split(separator: ".").map(String.init)
+        guard parts.count == 2 else { return nil }
+        return all.first { $0.app == parts[0] && $0.id == parts[1] }
+    }
+
+    static let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ReSpace/keys.json")
+
+    private static var kept: [String: [String: String]] {
+        get { (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [String: String]] } ?? [:] }
+        set {
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let data = try? JSONSerialization.data(withJSONObject: newValue, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: file, options: .atomic)
+            }
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.artursavytskyi.re.keys"), object: nil, userInfo: nil, deliverImmediately: true)
+        }
+    }
+
+    var shortcut: Shortcut {
+        get { Self.kept[app]?[id].flatMap(Shortcut.init(kept:)) ?? standard }
+        nonmutating set {
+            var all = Self.kept
+            var mine = all[app] ?? [:]
+            mine[id] = newValue == standard ? nil : newValue.kept
+            all[app] = mine.isEmpty ? nil : mine
+            Self.kept = all
+        }
+    }
+}
+
+/// A key the popup sets: one of the desk's, or one of an app's.
+enum Settable: Equatable {
+    case desk(DeskKey)
+    case app(AppKey)
+
+    init?(_ name: String) {
+        if let desk = DeskKey(rawValue: name) { self = .desk(desk) } else if let app = AppKey.named(name) { self = .app(app) } else { return nil }
+    }
+
+    var title: String {
+        switch self { case .desk(let k): k.title; case .app(let k): k.title }
+    }
+
+    var standard: Shortcut {
+        switch self { case .desk(let k): k.standard; case .app(let k): k.standard }
+    }
+
+    var shortcut: Shortcut {
+        get { switch self { case .desk(let k): k.shortcut; case .app(let k): k.shortcut } }
+        nonmutating set { switch self { case .desk(let k): k.shortcut = newValue; case .app(let k): k.shortcut = newValue } }
+    }
+
+    var changed: Bool { shortcut != standard }
+
+    /// the others its keys can't be shared with: the desk's all (they are taken before any app sees them), and
+    /// an app's own
+    var neighbours: [Settable] {
+        switch self {
+        case .desk: return DeskKey.allCases.map { .desk($0) }.filter { $0 != self }
+        case .app(let k): return AppKey.all.filter { $0.app == k.app && $0 != k }.map { .app($0) }
+        }
+    }
+}
+
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
     case settings, keys, lock, appearance, language, stillWallpaper, blurWallpaper
@@ -5008,25 +5112,25 @@ final class KeysPopup: Popup {
             ("On the Mac", [("2 – 5 knocks", "as chosen in settings"), ("snap or clap", "lock screen")]),
         ]),
         ("Re:File", [
-            (nil, [("⇧Enter  ⇧F…P", "all inside"), ("⌘N", "new window"), ("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
+            (nil, [("⇧Enter  ⇧F…P", "all inside"), ("@ReFile.newWindow", ""), ("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
                    ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
             ("Play", [("1 / 2 / 3", "folder / songs / radio"), ("Space", "play / pause"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("K", "keep a station"), ("M", "mini player")]),
             ("View", [("← →  Space", "turn the page"), ("M", "manga"), ("F", "full screen")]),
         ]),
         ("Re:Surf", [
-            (nil, [("⌘N", "new window"), ("⌘T", "new tab"), ("⌘L", "address"), ("⌘⇧W", "close tab"), ("⌃Tab", "next tab"), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
-                   ("⌘R", "reload"), ("⌘D", "favourite"), ("⌘F", "video fills the page"), ("⌘⇧F", "page fills the window"), ("⌘I", "info")]),
+            (nil, [("@ReSurf.newWindow", ""), ("@ReSurf.newTab", ""), ("@ReSurf.address", ""), ("@ReSurf.closeTab", ""), ("@ReSurf.nextTab", ""), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
+                   ("@ReSurf.reload", ""), ("@ReSurf.favourite", ""), ("@ReSurf.video", ""), ("@ReSurf.pageFull", ""), ("@ReSurf.info", "")]),
             ("Search", [("← / →", "previous / next page"), ("↑ / ↓  Enter", "choose, open")]),
         ]),
         ("Re:Note", [
-            ("Notes", [("⌘N", "new window"), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
+            ("Notes", [("@ReNote.newWindow", ""), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
                        ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
-            ("A note", [("⌘S", "save"), ("Esc", "back")]),
-            ("Writing", [("⌘B", "highlight"), ("⌘D", "draw"), ("⌘Z", "undo"), ("⌘⇧Z  ⌃Y", "redo")]),
+            ("A note", [("@ReNote.save", ""), ("Esc", "back")]),
+            ("Writing", [("@ReNote.highlight", ""), ("@ReNote.draw", ""), ("@ReNote.undo", ""), ("⌘⇧Z  ⌃Y", "redo")]),
             ("Drawing", [("drag", "draw"), ("⌥ drag", "rub out")]),
         ]),
         ("Re:Term", [
-            (nil, [("⌘N", "new window"), ("⌘⇧T / C", "TERM / CHAT"), ("⌘⇧F", "the whole window"), ("⌘K  NOVA", "new conversation"),
+            (nil, [("@ReTerm.newWindow", ""), ("⌘⇧T / C", "TERM / CHAT"), ("@ReTerm.wholeWindow", ""), ("@ReTerm.newConversation", ""),
                    ("⇧↑ / ⇧↓", "the conversation above / below")]),
             ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
                       ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
@@ -5039,11 +5143,11 @@ final class KeysPopup: Popup {
     // ── setting a key of one's own ──
 
     /// the key being set: the next keys pressed (with ⌘, ⌃ or ⌥) become its own
-    private var recording: DeskKey?
+    private var recording: Settable?
     private var monitor: Any?
 
     /// one of the desk's keys, as kept: a click and it waits for the new ones; one set otherwise brighter
-    private func setter(_ own: DeskKey) -> NSView {
+    private func setter(_ own: Settable) -> NSView {
         let waiting = recording == own
         let title = waiting ? tr("press the keys…") : own.shortcut.text
         let button = NSButton(title: "", target: nil, action: nil)
@@ -5061,7 +5165,7 @@ final class KeysPopup: Popup {
         return button
     }
 
-    private func record(_ own: DeskKey) {
+    private func record(_ own: Settable) {
         if recording == own { return stopRecording() }
         recording = own
         CommandKeys.recording = true
@@ -5092,16 +5196,20 @@ final class KeysPopup: Popup {
         }
         // a key alone (or with ⇧ only) would be taken from whatever is typed: ⌘, ⌃ or ⌥ with it
         guard !flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty else { return NSSound.beep() }
-        take(Shortcut(key: key, flags: flags), for: own)
+        guard take(Shortcut(key: key, flags: flags), for: own) else { return NSSound.beep() }
         stopRecording()
     }
 
-    /// the keys become this one's; another that had them gets this one's old ones (the two trade)
-    private func take(_ shortcut: Shortcut, for own: DeskKey) {
-        if let other = DeskKey.allCases.first(where: { $0 != own && $0.shortcut == shortcut }) {
+    /// the keys become this one's; another of its neighbours that had them gets this one's old ones (the two
+    /// trade). An app's key can't be one of the desk's: the desk would take it first.
+    @discardableResult
+    private func take(_ shortcut: Shortcut, for own: Settable) -> Bool {
+        if case .app = own, DeskKey.allCases.contains(where: { $0.shortcut == shortcut }) { return false }
+        if let other = own.neighbours.first(where: { $0.shortcut == shortcut }) {
             other.shortcut = own.shortcut
         }
         own.shortcut = shortcut
+        return true
     }
 
     private func stopRecording() {
@@ -5131,7 +5239,7 @@ final class KeysPopup: Popup {
             for (name, list) in app.parts {
                 if let name { views.append(caption(name)) }
                 for (key, what) in list {
-                    let own = key.hasPrefix("@") ? DeskKey(rawValue: String(key.dropFirst())) : nil
+                    let own = key.hasPrefix("@") ? Settable(String(key.dropFirst())) : nil
                     let left: NSView = own.map(setter) ?? keys(key)
                     let line = NSStackView(views: [left, NSView(), words(own?.title ?? what, size: 14)])
                     line.orientation = .horizontal
@@ -5151,7 +5259,7 @@ final class KeysPopup: Popup {
         row.alignment = .top
         row.distribution = .fillEqually
         row.spacing = 44
-        let footer = words("\(DeskKey.keys.shortcut.text) \(tr("or Esc closes"))  ·  \(DeskKey.settings.shortcut.text) \(tr("settings"))  ·  \(tr("click a key of Re:Desk to set your own, ⌫ for its own again"))",
+        let footer = words("\(DeskKey.keys.shortcut.text) \(tr("or Esc closes"))  ·  \(DeskKey.settings.shortcut.text) \(tr("settings"))  ·  \(tr("click a key to set your own, ⌫ for its own again"))",
                            size: 13, alpha: 0.4)
         let all = NSStackView(views: [row, footer])
         all.orientation = .vertical
