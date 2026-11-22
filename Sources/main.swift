@@ -2132,7 +2132,7 @@ private func CGSRegisterCursorWithImages(
 @_silgen_name("CoreCursorUnregisterAll")
 private func CoreCursorUnregisterAll(_ cid: CGSConnectionID) -> CGError
 
-/// The Re apps' ink cursors for every app on the Mac: the arrow, the I-beam and the pointing hand drawn
+/// The Re apps' ink cursors for every app on the Mac: the arrow and the pointing hand drawn
 /// with a brush (light ink while the Mac is dark; the arrow always light, with a dark rim). They stay until ReDesk quits or they are turned off
 /// (right click › Ink Cursors); then the Mac's own come back.
 enum InkCursors {
@@ -2152,9 +2152,7 @@ enum InkCursors {
         // the arrow: a diamond drawn out to its point (kite), white with a dark rim (InkCursors.kite)
         Shape(names: ["com.apple.coregraphics.ArrowS", "com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowCtx"],
               day: "kite", night: "kite", hotspot: CGPoint(x: 1.7, y: 1.4), rimmed: true),
-        // the text cursor: a thin line between two small diamonds (the desk's ◆)
-        Shape(names: ["com.apple.coregraphics.IBeamS", "com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamXOR"],
-              day: "ibeam", night: "ibeam", hotspot: CGPoint(x: 10, y: 10), rimmed: true),
+        // (over text the Mac's own I-beam stays)
         // the hand (over what opens): the arrow's diamond, upright, pointing at it
         Shape(names: ["com.apple.cursor.13"], day: "hand", night: "hand", hotspot: CGPoint(x: 10, y: 1.4), rimmed: true),
     ]
@@ -2175,6 +2173,8 @@ enum InkCursors {
             _ = CoreCursorUnregisterAll(cid)
             return
         }
+        // from the Mac's own first: a shape no longer drawn here is the Mac's again
+        _ = CoreCursorUnregisterAll(cid)
         let night = Appearance.dark
         for shape in shapes {
             guard let images = images(night ? shape.night : shape.day, rimmed: shape.rimmed) else { continue }
@@ -2193,7 +2193,7 @@ enum InkCursors {
     }
 
     /// The cursors drawn here, white, in a 200 × 200 picture (from its top left): the arrow a diamond drawn
-    /// out to its point (kite), the hand the same upright, the text cursor a thin line between two small ◆.
+    /// out to its point (kite), the hand the same upright.
     private static func picture(_ name: String) -> CGImage? {
         guard let c = CGContext(data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -2215,14 +2215,6 @@ enum InkCursors {
             kite(tip: CGPoint(x: 10, y: 6), degrees: 62, side: 54, widest: 136, length: 190)
         case "hand":
             kite(tip: CGPoint(x: 100, y: 6), degrees: 90, side: 50, widest: 128, length: 184)
-        case "ibeam":
-            // each part filled by itself: overlapping, they would cut holes in each other
-            c.fill(CGRect(x: 93, y: 200 - 166, width: 14, height: 132))
-            for y: CGFloat in [30, 170] {
-                c.move(to: p(100, y - 17)); c.addLine(to: p(117, y)); c.addLine(to: p(100, y + 17)); c.addLine(to: p(83, y))
-                c.closePath()
-                c.fillPath()
-            }
         default:
             return nil
         }
@@ -2232,7 +2224,7 @@ enum InkCursors {
 
     /// The picture at each scale the screen may want (1×, 2×, 3×, 4×).
     private static func images(_ name: String, rimmed: Bool = false) -> [CGImage]? {
-        let drawn = ["kite", "hand", "ibeam"].contains(name)
+        let drawn = ["kite", "hand"].contains(name)
         guard let image = drawn ? picture(name) : Bundle.main.url(forResource: name, withExtension: "png")
             .flatMap({ CGImageSourceCreateWithURL($0 as CFURL, nil) })
             .flatMap({ CGImageSourceCreateImageAtIndex($0, 0, nil) }) else { return nil }
