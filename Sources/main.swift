@@ -2562,8 +2562,8 @@ func drawDiamond(at c: NSPoint, color: NSColor = strong) {
 }
 
 /// A thin rounded bar: `filled` of it in the strong ink, from the left (or the bottom), the rest faint.
-func drawBar(in rect: NSRect, filled: Double, vertical: Bool) {
-    let radius = barWidth / 2
+func drawBar(in rect: NSRect, filled: Double, vertical: Bool, width: CGFloat = barWidth) {
+    let radius = width / 2
     faint.setFill()
     NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
     let part = CGFloat(max(0, min(filled, 1)))
@@ -3044,15 +3044,17 @@ final class Meter {
 
 /// While sound plays: three soft sine lines drifting along the bottom, tapering to nothing at
 /// both ends. Their height follows how loud it is; in silence they settle flat and away.
-/// The time as three bars making a triangle, point up, their ends kept apart at its corners: the left side the
-/// day's hours (filling up to the top), the right the hour's minutes (down from the top), the bottom the
-/// minute's seconds (right to left), all three going round as a clock's hands do.
+/// The time as three thin bars making a triangle, point down, their ends kept apart at its corners: the top the
+/// day's hours (left to right), the right side the hour's minutes (down to the point), the left the minute's
+/// seconds (up from the point), all three going round as a clock's hands do.
 final class TimeView: NSView {
     /// each side, and the room round the triangle
     static let side: CGFloat = 58
     static let margin: CGFloat = 4
     /// left open at each corner, each end
     private let gap: CGFloat = 5
+    /// the bars' width: thinner than the desk's others
+    private let line: CGFloat = 2
     private var ticks: Timer?
 
     override init(frame: NSRect) {
@@ -3072,15 +3074,15 @@ final class TimeView: NSView {
         let minutes = Double(parts.minute ?? 0) + seconds / 60
         let hours = Double(parts.hour ?? 0) + minutes / 60
 
-        // the corners: the top, the bottom right, the bottom left
+        // the corners: the top left, the top right, the point below
         let s = Self.side, h = s * sqrt(3) / 2
-        let bottom = bounds.midY - h / 2
-        let top = NSPoint(x: bounds.midX, y: bottom + h)
-        let right = NSPoint(x: bounds.midX + s / 2, y: bottom)
-        let left = NSPoint(x: bounds.midX - s / 2, y: bottom)
-        bar(from: left, to: top, filled: hours / 24)
-        bar(from: top, to: right, filled: minutes / 60)
-        bar(from: right, to: left, filled: seconds / 60)
+        let top = bounds.midY + h / 2
+        let left = NSPoint(x: bounds.midX - s / 2, y: top)
+        let right = NSPoint(x: bounds.midX + s / 2, y: top)
+        let point = NSPoint(x: bounds.midX, y: top - h)
+        bar(from: left, to: right, filled: hours / 24)
+        bar(from: right, to: point, filled: minutes / 60)
+        bar(from: point, to: left, filled: seconds / 60)
     }
 
     /// a bar along one side, short of both corners, filling from `a` towards `b`
@@ -3092,7 +3094,7 @@ final class TimeView: NSView {
         turn.translateX(by: a.x, yBy: a.y)
         turn.rotate(byRadians: atan2(dy, dx))
         turn.concat()
-        drawBar(in: NSRect(x: gap, y: -barWidth / 2, width: length - 2 * gap, height: barWidth), filled: filled, vertical: false)
+        drawBar(in: NSRect(x: gap, y: -line / 2, width: length - 2 * gap, height: line), filled: filled, vertical: false, width: line)
         NSGraphicsContext.restoreGraphicsState()
     }
 }
