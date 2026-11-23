@@ -1602,6 +1602,9 @@ final class Tiler {
     /// screen's turn is `order`).
     private var others: [Int: [TiledWindow]] = [:]
 
+    /// a window in another screen's turn
+    private func isElsewhere(_ window: TiledWindow) -> Bool { others.values.contains { $0.contains(window) } }
+
     /// the Re apps' windows on each other screen now, by the screen's place among the screens
     private func otherOpen() -> [Int: [TiledWindow]] {
         let screens = NSScreen.screens
@@ -1631,7 +1634,8 @@ final class Tiler {
         var next: [Int: [TiledWindow]] = [:]
         for (k, list) in open {
             let kept = (others[k] ?? []).filter(list.contains)
-            next[k] = list.filter { !kept.contains($0) } + kept
+            // a pinned one stays at its place in the turn
+            next[k] = anchored(list.filter { !kept.contains($0) } + kept)
         }
         let changed = next != others
         others = next
@@ -1700,7 +1704,7 @@ final class Tiler {
             let drop = point ?? NSPoint(x: now.midX, y: now.midY)
             if let (k, list) = others.first(where: { $0.value.contains(window) }), let i = list.firstIndex(of: window),
                let target = placed.first(where: { $0.1.contains(drop) && $0.0 != window }),
-               let j = list.firstIndex(of: target.0) {
+               let j = list.firstIndex(of: target.0), pinned[window] == nil, pinned[target.0] == nil {
                 var swapped = list
                 swapped.swapAt(i, j)
                 others[k] = swapped
@@ -1798,7 +1802,7 @@ final class Tiler {
         if !gone.isEmpty { Self.log("gone: \(gone.map { "\($0.id ?? 0)" + (pinned[$0] != nil ? "📌" : "") })") }
         known = known.filter { !gone.contains($0) }
         known = open.filter { !known.contains($0) } + known
-        pinned = pinned.filter { known.contains($0.key) }
+        pinned = pinned.filter { known.contains($0.key) || isElsewhere($0.key) }
         fresh(open)
         let now = anchored(known.filter(open.contains))
         let elsewhere = refreshOthers()
@@ -1825,7 +1829,7 @@ final class Tiler {
         if !gone.isEmpty { Self.log("gone: \(gone.map { "\($0.id ?? 0)" + (pinned[$0] != nil ? "📌" : "") })") }
         known = known.filter { !gone.contains($0) }
         known = open.filter { !known.contains($0) } + known
-        pinned = pinned.filter { known.contains($0.key) }
+        pinned = pinned.filter { known.contains($0.key) || isElsewhere($0.key) }
         fresh(open)
         order = anchored(known.filter(open.contains))
         say("desktop")
@@ -1866,7 +1870,17 @@ final class Tiler {
 
     /// ⌃⌥P: the focused window pinned to its place, or let go again; a frame lights up over it for a moment.
     func togglePin() {
-        guard on, AXIsProcessTrusted(), let window = focusedWindow(), let at = order.firstIndex(of: window) else { return }
+        guard on, AXIsProcessTrusted() else { return }
+        // a window on another screen: pinned at its place in that screen's turn
+        if focusedWindow() == nil, let window = focusedReWindow() {
+            refreshOthers()
+            guard let list = others.values.first(where: { $0.contains(window) }), let at = list.firstIndex(of: window) else { return }
+            if pinned[window] == nil { pinned[window] = at } else { pinned[window] = nil }
+            say(pinned[window] == nil ? "unpin \(window.id ?? 0) elsewhere" : "pin \(window.id ?? 0) elsewhere")
+            if let r = otherPlaces().first(where: { $0.0 == window })?.1 { mark.flash(r, strong: pinned[window] != nil) }
+            return retile()
+        }
+        guard let window = focusedWindow(), let at = order.firstIndex(of: window) else { return }
         if pinned[window] == nil { pinned[window] = at } else { pinned[window] = nil }
         say(pinned[window] == nil ? "unpin \(window.id ?? 0)" : "pin \(window.id ?? 0)")
         if let r = place(of: window) { mark.flash(r, strong: pinned[window] != nil) }
@@ -1962,6 +1976,7 @@ final class Tiler {
         if let moved = movedWindow() {
             // dragged onto another screen: tiled there now; the others here close up
             if Tiler.onOtherScreen(order[moved.index].element) {
+                pinned[order[moved.index]] = nil
                 lookNow()
                 retile()
                 return
@@ -2131,7 +2146,12 @@ final class Tiler {
         }
         // the other screens' windows, each in its screen's middle
         refreshOthers()
-        moves += otherPlaces().compactMap { window, to in frame(of: window.element).map { Move(window: window, from: $0, to: to) } }
+        let elsewhere = otherPlaces()
+        moves += elsewhere.compactMap { window, to in frame(of: window.element).map { Move(window: window, from: $0, to: to) } }
+        if !elsewhere.isEmpty {
+            WindowJoins.tell(elsewhere.map { ($0.0.element, $0.1) }, separate: !flush || arrangement.stacks,
+                             pinned: pinned.keys.map(\.element), shared: false)
+        }
         animate(moves)
     }
 
@@ -2196,6 +2216,7 @@ final class Tiler {
         let here = screens.firstIndex { $0.frame.contains(middle) } ?? 0
         let there = screens[(here + 1) % screens.count].visibleFrame
         let w = min(now.width, there.width * 0.9), h = min(now.height, there.height * 0.9)
+        pinned[TiledWindow(element: window)] = nil
         setFrame(of: window, to: NSRect(x: there.midX - w / 2, y: there.midY - h / 2, width: w, height: h), exact: true)
         if on { lookNow(); retile() }
     }
