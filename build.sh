@@ -11,12 +11,19 @@ cp Resources/* "$APP/Contents/Resources/"
 cp -R wallpapers "$APP/Contents/Resources/"
 # ad-hoc, but known by its identifier rather than by this build's hash, so macOS keeps
 # the Accessibility and audio permissions from one build to the next
-# signed with the Apple Development certificate in the keychain if there is one (its team in the
-# requirement, so the permissions given, Accessibility and the like, outlive rebuilds); ad hoc otherwise
-IDENTITY=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')
+# Signed as well as the keychain allows: with a Developer ID Application certificate for others' Macs (the
+# hardened runtime and a timestamp, as notarizing wants); else with an Apple Development one (this Mac); else ad
+# hoc. The team is in the requirement, so the permissions given (Accessibility and the like) outlive rebuilds.
+IDENTITIES=$(security find-identity -v -p codesigning)
+IDENTITY=$(echo "$IDENTITIES" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+RUNTIME="--options runtime --timestamp --entitlements ReDesk.entitlements"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY=$(echo "$IDENTITIES" | awk -F'"' '/Apple Development/ {print $2; exit}')
+  RUNTIME="--timestamp=none"
+fi
 if [ -n "$IDENTITY" ]; then
   TEAM=$(security find-certificate -c "$IDENTITY" -p | openssl x509 -noout -subject -nameopt multiline | awk -F'= ' '/organizationalUnitName/ {print $2; exit}')
-  codesign --force --timestamp=none -s "$IDENTITY" \
+  codesign --force $RUNTIME -s "$IDENTITY" \
     -r="designated => identifier \"com.artursavytskyi.redesk\" and anchor apple generic and certificate leaf[subject.OU] = \"$TEAM\"" "$APP"
 else
   codesign --force -s - -r='designated => identifier "com.artursavytskyi.redesk"' "$APP"
