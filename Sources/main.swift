@@ -1597,6 +1597,91 @@ final class Tiler {
 
     private struct Move { let window: TiledWindow; let from: NSRect; let to: NSRect }
 
+    /// The windows on the other screens (an external display), each screen's in its own turn, newest first:
+    /// tiled in that screen's middle in the same arrangement, without pins or resized shares (the main
+    /// screen's turn is `order`).
+    private var others: [Int: [TiledWindow]] = [:]
+
+    /// the Re apps' windows on each other screen now, by the screen's place among the screens
+    private func otherOpen() -> [Int: [TiledWindow]] {
+        let screens = NSScreen.screens
+        guard screens.count > 1 else { return [:] }
+        let visible = Desktops.onScreen()
+        var found: [Int: [TiledWindow]] = [:]
+        for app in NSWorkspace.shared.runningApplications where tiledApps.contains(app.bundleIdentifier ?? "") && !app.isHidden {
+            let windows = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement] ?? []
+            for w in windows {
+                guard Desktops.number(of: w).map({ visible.contains($0) && !leaving.contains($0) }) ?? true,
+                      attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole,
+                      attribute(w, kAXMinimizedAttribute) as? Bool != true,
+                      attribute(w, "AXFullScreen") as? Bool != true,
+                      let f = frame(of: w) else { continue }
+                let middle = NSPoint(x: f.midX, y: f.midY)
+                guard let k = screens.indices.dropFirst().first(where: { screens[$0].frame.contains(middle) }) else { continue }
+                found[k, default: []].append(TiledWindow(element: w))
+            }
+        }
+        return found
+    }
+
+    /// the other screens' turns brought up to date; whether they changed
+    @discardableResult
+    private func refreshOthers() -> Bool {
+        let open = otherOpen()
+        var next: [Int: [TiledWindow]] = [:]
+        for (k, list) in open {
+            let kept = (others[k] ?? []).filter(list.contains)
+            next[k] = list.filter { !kept.contains($0) } + kept
+        }
+        let changed = next != others
+        others = next
+        return changed
+    }
+
+    /// where the windows share on a screen: as on the main one (the middle, all of it in Full, nearly all in Almost Full)
+    private func area(of screen: NSScreen) -> NSRect {
+        let layout = Layout(area: screen.visibleFrame)
+        if arrangement == .full { return layout.area }
+        let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
+                            width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
+        return almostFull ? almost : layout.tiles
+    }
+
+    /// each other screen's windows and their places there
+    private func otherPlaces() -> [(TiledWindow, NSRect)] {
+        let screens = NSScreen.screens
+        return others.flatMap { k, list -> [(TiledWindow, NSRect)] in
+            guard k < screens.count, !list.isEmpty else { return [] }
+            let frames = arrangement.frames(count: list.count, in: area(of: screens[k]), shares: [:]).map(\.integral)
+            return Array(zip(list, frames))
+        }
+    }
+
+    /// A window on another screen moved by hand: dropped on another's place there, they trade; brought to the
+    /// main screen, it joins the turn there. True if one was.
+    private func releasedElsewhere(at point: NSPoint?) -> Bool {
+        let placed = otherPlaces()
+        for (window, place) in placed {
+            guard let now = frame(of: window.element), let was = settled[window] else { continue }
+            let moved = (abs(now.minX - was.minX) > 4 || abs(now.maxY - was.maxY) > 4)
+                && abs(now.width - was.width) <= 2 && abs(now.height - was.height) <= 2
+            guard moved else { continue }
+            let drop = point ?? NSPoint(x: now.midX, y: now.midY)
+            if let (k, list) = others.first(where: { $0.value.contains(window) }), let i = list.firstIndex(of: window),
+               let target = placed.first(where: { $0.1.contains(drop) && $0.0 != window }),
+               let j = list.firstIndex(of: target.0) {
+                var swapped = list
+                swapped.swapAt(i, j)
+                others[k] = swapped
+            }
+            _ = place
+            lookNow()
+            retile()
+            return true
+        }
+        return false
+    }
+
     /// ~/Library/Application Support/ReDesk/Tiler.log: the turn and the pins as they change (to find why a pin goes)
     static func log(_ line: String) {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ReDesk")
@@ -1685,9 +1770,12 @@ final class Tiler {
         pinned = pinned.filter { known.contains($0.key) }
         fresh(open)
         let now = anchored(known.filter(open.contains))
+        let elsewhere = refreshOthers()
         if now != order {
             order = now
             say("look")
+            retile()
+        } else if elsewhere {
             retile()
         } else {
             // moved without the mouse (the keyboard, the app itself): back to its place
@@ -1780,7 +1868,7 @@ final class Tiler {
                             && attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
                             && attribute(w, kAXMinimizedAttribute) as? Bool != true
                             && attribute(w, "AXFullScreen") as? Bool != true
-                            // on another screen (an external display): free, the desk's tiling is the main screen's
+                            // on another screen (an external display): in that screen's turn, not this one's
                             && !Tiler.onOtherScreen(w)
                     }
                     .map { TiledWindow(element: $0) }
@@ -1830,8 +1918,9 @@ final class Tiler {
         dragged = nil
         resizing = nil
         guard on, animation == nil else { return }
+        if releasedElsewhere(at: point) { return }
         if let moved = movedWindow() {
-            // dragged onto another screen: it stays there, free; the others close up
+            // dragged onto another screen: tiled there now; the others here close up
             if Tiler.onOtherScreen(order[moved.index].element) {
                 lookNow()
                 retile()
@@ -1965,9 +2054,12 @@ final class Tiler {
         // each app told which of its corners to round (all, but while Flush); stacked, each window is alone
         WindowJoins.tell(zip(order, slots).map { ($0.element, $1) }, separate: !flush || arrangement.stacks,
                          pinned: pinned.keys.map(\.element), shared: sharedGlass)
-        let moves = zip(order, slots).compactMap { window, to in
+        var moves = zip(order, slots).compactMap { window, to in
             frame(of: window.element).map { Move(window: window, from: $0, to: to) }
         }
+        // the other screens' windows, each in its screen's middle
+        refreshOthers()
+        moves += otherPlaces().compactMap { window, to in frame(of: window.element).map { Move(window: window, from: $0, to: to) } }
         animate(moves)
     }
 
@@ -2016,8 +2108,8 @@ final class Tiler {
         return NSScreen.screens.dropFirst().contains { $0.frame.contains(middle) }
     }
 
-    /// ⌃⌥O: the window with the keyboard to the next screen, in its middle, as large as fits there; on the
-    /// main screen it is tiled with the others, on another it is free. The windows left close up.
+    /// ⌃⌥O: the window with the keyboard to the next screen, in its middle, as large as fits there; tiled
+    /// there with that screen's windows. The windows left close up.
     func toOtherScreen() {
         guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
         let screens = NSScreen.screens
