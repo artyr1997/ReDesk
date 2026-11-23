@@ -1601,6 +1601,8 @@ final class Tiler {
     /// tiled in that screen's middle in the same arrangement, without pins or resized shares (the main
     /// screen's turn is `order`).
     private var others: [Int: [TiledWindow]] = [:]
+    /// the other screens' glass under their windows in Flush, one each
+    private var otherGlass: [Int: GlassBackdrop] = [:]
 
     /// a window in another screen's turn
     private func isElsewhere(_ window: TiledWindow) -> Bool { others.values.contains { $0.contains(window) } }
@@ -1774,8 +1776,10 @@ final class Tiler {
         timer = nil
         overlay.hide()
         GlassBackdrop.shared.hide()
-        // no longer tiled: every window round again
-        WindowJoins.tell(order.compactMap { w in frame(of: w.element).map { (w.element, $0) } }, separate: true)
+        otherGlass.values.forEach { $0.hide() }
+        // no longer tiled: every window round again, on every screen
+        let all = order + others.values.flatMap { $0 }
+        WindowJoins.tell(all.compactMap { w in frame(of: w.element).map { (w.element, $0) } }, separate: true)
     }
 
     private func tick() {
@@ -2148,9 +2152,21 @@ final class Tiler {
         refreshOthers()
         let elsewhere = otherPlaces()
         moves += elsewhere.compactMap { window, to in frame(of: window.element).map { Move(window: window, from: $0, to: to) } }
-        if !elsewhere.isEmpty {
-            WindowJoins.tell(elsewhere.map { ($0.0.element, $0.1) }, separate: !flush || arrangement.stacks,
-                             pinned: pinned.keys.map(\.element), shared: false)
+        // each other screen as the main one: in Flush one glass under its windows, which drop their own
+        for k in Set(otherGlass.keys).union(others.keys) {
+            let list = others[k] ?? []
+            let placed = elsewhere.filter { list.contains($0.0) }
+            let joined = on && flush && !arrangement.stacks && placed.count > 1
+            if joined, let first = placed.first?.1 {
+                (otherGlass[k] ?? { let g = GlassBackdrop(); otherGlass[k] = g; return g }())
+                    .show(placed.dropFirst().reduce(first) { $0.union($1.1) }, duration: 0.32)
+            } else {
+                otherGlass[k]?.hide()
+            }
+            if !placed.isEmpty {
+                WindowJoins.tell(placed.map { ($0.0.element, $0.1) }, separate: !flush || arrangement.stacks,
+                                 pinned: pinned.keys.map(\.element), shared: joined)
+            }
         }
         animate(moves)
     }
