@@ -3403,7 +3403,9 @@ final class DeskWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 
     func place(on screen: NSScreen) {
-        setFrame(frameOn(Layout(area: screen.visibleFrame)).integral, display: true)
+        // by the whole screen, not what the menu bar leaves: on every screen the same, the side dashes in its
+        // very middle (the menu bar pushed them down on the main one)
+        setFrame(frameOn(Layout(area: screen.frame)).integral, display: true)
         orderFront(nil)
         contentView?.needsDisplay = true
     }
