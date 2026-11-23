@@ -86,10 +86,12 @@ struct Layout {
     var dayLine: CGFloat { topWord + (area.maxY - topWord) * 0.35 - 8 }
     /// the wave: the day line's twin at the bottom
     var waveLine: CGFloat { bottomWord - (bottomWord - area.minY) * 0.35 + 8 }
-    /// where tiled windows go: between the side columns, from the tops of FILE and SURF down to the feet of
-    /// TERM and NOTE (a Layout of the whole screen, as the words are placed by it)
+    /// where tiled windows go: from the tops of FILE and SURF down to the feet of TERM and NOTE, and across
+    /// as far from the side columns as those are from the screen's edges (the columns stand at 5%, the
+    /// windows begin at 10%) (a Layout of the whole screen, as the words are placed by it)
     var tiles: NSRect {
-        NSRect(x: leftX + 56, y: bottomWord, width: rightX - leftX - 112, height: topWord - bottomWord)
+        let side = (leftX - area.minX) * 2
+        return NSRect(x: area.minX + side, y: bottomWord, width: area.width - side * 2, height: topWord - bottomWord)
     }
 }
 
