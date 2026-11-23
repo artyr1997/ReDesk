@@ -4953,13 +4953,25 @@ class Popup: NSPanel {
 
 /// the popup's pane
 final class PaperView: NSView {
+    /// room round the paper for the corners' + (their arms reach out past it)
+    static let margin: CGFloat = 8
+
     override func draw(_ dirtyRect: NSRect) {
+        let paper = bounds.insetBy(dx: Self.margin, dy: Self.margin)
         Popup.paper.setFill()
-        bounds.fill()
+        paper.fill()
+        // no frame round it: a thin + at each of its corners, as ReDesk marks windows' corners
+        let path = NSBezierPath()
+        let a = PlusMarks.arm
+        for p in [NSPoint(x: paper.minX, y: paper.minY), NSPoint(x: paper.maxX, y: paper.minY),
+                  NSPoint(x: paper.minX, y: paper.maxY), NSPoint(x: paper.maxX, y: paper.maxY)] {
+            let x = p.x.rounded() + 0.25, y = p.y.rounded() - 0.25
+            path.move(to: NSPoint(x: x - a, y: y)); path.line(to: NSPoint(x: x + a, y: y))
+            path.move(to: NSPoint(x: x, y: y - a)); path.line(to: NSPoint(x: x, y: y + a))
+        }
+        path.lineWidth = PlusMarks.line
         Popup.line.setStroke()
-        let edge = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
-        edge.lineWidth = 1
-        edge.stroke()
+        path.stroke()
     }
 }
 
