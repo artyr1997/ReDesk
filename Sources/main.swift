@@ -2243,8 +2243,11 @@ final class Tiler {
     /// ← / ↑ and → / ↓ go back and forth through them.
     func focus(_ direction: Direction) {
         guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
-        let windows = on && !order.isEmpty ? order : openWindows()
-        guard let current = focusedWindow() ?? windows.first, windows.count > 1,
+        // the windows on every screen: the nearest may be on another one
+        refreshOthers()
+        let windows = (on && !order.isEmpty ? order : openWindows()) + others.keys.sorted().flatMap { others[$0] ?? [] }
+        guard let current = focusedWindow() ?? focusedReWindow().flatMap({ windows.contains($0) ? $0 : nil }) ?? windows.first,
+              windows.count > 1,
               let target = neighbour(of: current, among: windows, toward: direction) else { return }
         raise(target)
     }
@@ -2252,7 +2255,19 @@ final class Tiler {
     /// ⌘⌥ arrows: the focused window trades places with the nearest one that way, and keeps the focus.
     /// In One at a Time it moves back or forth in the turn.
     func move(_ direction: Direction) {
-        guard on, AXIsProcessTrusted(), let current = focusedWindow(),
+        guard on, AXIsProcessTrusted() else { return }
+        // a window on another screen: it trades with its nearest neighbour there
+        if focusedWindow() == nil, let current = focusedReWindow() {
+            refreshOthers()
+            guard let (k, list) = others.first(where: { $0.value.contains(current) }), let at = list.firstIndex(of: current),
+                  let target = neighbour(of: current, among: list, toward: direction), let to = list.firstIndex(of: target),
+                  pinned[current] == nil, pinned[target] == nil else { return }
+            var swapped = list
+            swapped.swapAt(at, to)
+            others[k] = swapped
+            return retile()
+        }
+        guard let current = focusedWindow(),
               let at = order.firstIndex(of: current),
               let target = neighbour(of: current, among: order, toward: direction),
               let to = order.firstIndex(of: target), pinned[current] == nil, pinned[target] == nil else { return }
@@ -2263,6 +2278,7 @@ final class Tiler {
     /// Where a window belongs while tiling (it may still be gliding there), otherwise where it is.
     private func place(of window: TiledWindow) -> NSRect? {
         if on, slots.count == order.count, let at = order.firstIndex(of: window) { return slots[at] }
+        if on, let there = otherPlaces().first(where: { $0.0 == window }) { return there.1 }
         return frame(of: window.element)
     }
 
