@@ -73,53 +73,62 @@ func open(_ corner: Corner) {
 
 // ── the desk's layout: the apps' insets, 5% of the width from the sides, 6.25% of the height ──
 
-/// How far the side columns (the corner words, the desktops' and wallpapers' dashes) stand from a screen's
-/// edges, as a share of its width: each screen its own (kept by the display, so a monitor plugged in again
-/// finds it), set by keys on the screen the mouse is on (⌃⌥- nearer, ⌃⌥= further). The tiled windows keep as
-/// far again from the columns.
-enum SideMargin {
+/// How far the desk's words stand from a screen's edges, as a share of it: across (the side columns, the
+/// corner words and the dashes, from the left and right edges: ⌃⌥- nearer, ⌃⌥= further) and down (the corner
+/// words from the top and bottom edges: ⌃⌥[ nearer, ⌃⌥] further). Each screen its own, kept by the display (a
+/// monitor plugged in again finds its own), set on the screen the mouse is on. The tiled windows keep as far
+/// again from the side columns, and reach from the top words to the bottom ones.
+struct SideMargin {
     static let changed = Notification.Name("ReDeskSideMarginChanged")
     static let least: CGFloat = 0.02, most: CGFloat = 0.15, step: CGFloat = 0.005
-    /// a screen not set yet: as all were set before each had its own, else 5%
-    static var usual: CGFloat { (UserDefaults.standard.object(forKey: "sideMargin") as? Double).map { CGFloat($0) } ?? 0.05 }
+
+    /// across, from the left and right edges; down, from the top and bottom
+    static let across = SideMargin(name: "sideMargin", start: 0.05)
+    static let down = SideMargin(name: "topMargin", start: 0.0625)
+
+    let name: String
+    let start: CGFloat
+
+    /// a screen not set yet: as all were set before each had its own, else as it began
+    private var usual: CGFloat { (UserDefaults.standard.object(forKey: name) as? Double).map { CGFloat($0) } ?? start }
 
     /// a screen's own key: its display's UUID (the same each time it is plugged in)
-    private static func key(_ screen: NSScreen) -> String {
+    private func key(_ screen: NSScreen) -> String {
         let number = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
         let uuid = CGDisplayCreateUUIDFromDisplayID(number).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "\(number)"
-        return "sideMargin." + uuid
+        return name + "." + uuid
     }
 
-    static func share(of screen: NSScreen) -> CGFloat {
+    func share(of screen: NSScreen) -> CGFloat {
         (UserDefaults.standard.object(forKey: key(screen)) as? Double).map { CGFloat($0) } ?? usual
     }
 
     /// the share for a place laid out on a screen (the screen holding its middle)
-    static func share(for area: NSRect) -> CGFloat {
+    func share(for area: NSRect) -> CGFloat {
         let middle = NSPoint(x: area.midX, y: area.midY)
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(middle) }) ?? NSScreen.screens.first else { return usual }
         return share(of: screen)
     }
 
     /// a step nearer the edges (-1) or further from them (1), on the screen the mouse is on
-    static func move(_ way: CGFloat) {
+    func move(_ way: CGFloat) {
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.screens.first else { return }
         let now = share(of: screen)
-        let next = min(most, max(least, now + way * step))
+        let next = min(Self.most, max(Self.least, now + way * Self.step))
         guard next != now else { return NSSound.beep() }
         UserDefaults.standard.set(Double(next), forKey: key(screen))
-        NotificationCenter.default.post(name: changed, object: nil)
+        NotificationCenter.default.post(name: Self.changed, object: nil)
     }
 }
 
 struct Layout {
     let area: NSRect
 
-    var leftX: CGFloat { area.minX + area.width * SideMargin.share(for: area) }
-    var rightX: CGFloat { area.maxX - area.width * SideMargin.share(for: area) }
-    var topWord: CGFloat { area.maxY - area.height * 0.0625 }
-    var bottomWord: CGFloat { area.minY + area.height * 0.0625 }
+    var leftX: CGFloat { area.minX + area.width * SideMargin.across.share(for: area) }
+    var rightX: CGFloat { area.maxX - area.width * SideMargin.across.share(for: area) }
+    var topWord: CGFloat { area.maxY - area.height * SideMargin.down.share(for: area) }
+    var bottomWord: CGFloat { area.minY + area.height * SideMargin.down.share(for: area) }
     /// the dots on the left and the battery on the right share this length, around the middle
     var sideLength: CGFloat { area.height * 0.22 }
     /// the day line: a little under halfway between the top of the screen and the tops of FILE and SURF
@@ -1031,7 +1040,7 @@ enum Settable: Equatable {
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
     case settings, keys, lock, appearance, language, stillWallpaper, blurWallpaper
-    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, sidesIn, sidesOut
+    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, sidesIn, sidesOut, wordsIn, wordsOut
 
     /// its line in the popup
     var title: String {
@@ -1053,6 +1062,8 @@ enum DeskKey: String, CaseIterable {
         case .otherScreen: "the window to the other screen"
         case .sidesIn: "the side columns nearer the edges"
         case .sidesOut: "the side columns further from the edges"
+        case .wordsIn: "the top and bottom words nearer the edges"
+        case .wordsOut: "the top and bottom words further from the edges"
         }
     }
 
@@ -1077,12 +1088,14 @@ enum DeskKey: String, CaseIterable {
         case .otherScreen: return Shortcut(key: kVK_ANSI_O, flags: ctrlAlt)
         case .sidesIn: return Shortcut(key: kVK_ANSI_Minus, flags: ctrlAlt)
         case .sidesOut: return Shortcut(key: kVK_ANSI_Equal, flags: ctrlAlt)
+        case .wordsIn: return Shortcut(key: kVK_ANSI_LeftBracket, flags: ctrlAlt)
+        case .wordsOut: return Shortcut(key: kVK_ANSI_RightBracket, flags: ctrlAlt)
         }
     }
 
     /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
     var anywhere: Bool {
-        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen, .sidesIn, .sidesOut].contains(self)
+        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen, .sidesIn, .sidesOut, .wordsIn, .wordsOut].contains(self)
     }
 
     var shortcut: Shortcut {
@@ -1115,8 +1128,10 @@ enum DeskKey: String, CaseIterable {
         case .promote: Tiler.shared.promote()
         case .pin: Tiler.shared.togglePin()
         case .otherScreen: Tiler.shared.toOtherScreen()
-        case .sidesIn: SideMargin.move(-1)
-        case .sidesOut: SideMargin.move(1)
+        case .sidesIn: SideMargin.across.move(-1)
+        case .sidesOut: SideMargin.across.move(1)
+        case .wordsIn: SideMargin.down.move(-1)
+        case .wordsOut: SideMargin.down.move(1)
         }
     }
 }
@@ -5433,7 +5448,7 @@ final class KeysPopup: Popup {
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
                          ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
                          ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""),
-                         ("@sidesIn", ""), ("@sidesOut", "")]),
+                         ("@sidesIn", ""), ("@sidesOut", ""), ("@wordsIn", ""), ("@wordsOut", "")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
             ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
                           ("⌥← / ⌥→", "previous / next wallpaper")]),
