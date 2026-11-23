@@ -131,10 +131,10 @@ struct Layout {
     var bottomWord: CGFloat { area.minY + area.height * SideMargin.down.share(for: area) }
     /// the dots on the left and the battery on the right share this length, around the middle
     var sideLength: CGFloat { area.height * 0.22 }
-    /// the day line: a little under halfway between the top of the screen and the tops of FILE and SURF
-    var dayLine: CGFloat { topWord + (area.maxY - topWord) * 0.35 - 8 }
-    /// the wave: the day line's twin at the bottom
-    var waveLine: CGFloat { bottomWord - (bottomWord - area.minY) * 0.35 + 8 }
+    /// the day line: halfway between the top of the screen and the tops of FILE and SURF (the windows' top)
+    var dayLine: CGFloat { (topWord + area.maxY) / 2 }
+    /// the wave: halfway between the bottom of the screen and the feet of TERM and NOTE (the windows' foot)
+    var waveLine: CGFloat { (bottomWord + area.minY) / 2 }
     /// where tiled windows go: from the tops of FILE and SURF down to the feet of TERM and NOTE, and across
     /// as far from the side columns as those are from the screen's edges (the columns stand at 5%, the
     /// windows begin at 10%) (a Layout of the whole screen, as the words are placed by it)
