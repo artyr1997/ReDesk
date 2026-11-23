@@ -86,9 +86,10 @@ struct Layout {
     var dayLine: CGFloat { topWord + (area.maxY - topWord) * 0.35 - 8 }
     /// the wave: the day line's twin at the bottom
     var waveLine: CGFloat { bottomWord - (bottomWord - area.minY) * 0.35 + 8 }
-    /// where tiled windows go: between the side columns, 40pt under the day line and over the wave
+    /// where tiled windows go: between the side columns, from the tops of FILE and SURF down to the feet of
+    /// TERM and NOTE (a Layout of the whole screen, as the words are placed by it)
     var tiles: NSRect {
-        NSRect(x: leftX + 56, y: waveLine + 40, width: rightX - leftX - 112, height: dayLine - waveLine - 80)
+        NSRect(x: leftX + 56, y: bottomWord, width: rightX - leftX - 112, height: topWord - bottomWord)
     }
 }
 
@@ -1653,7 +1654,7 @@ final class Tiler {
         if arrangement == .full { return layout.area }
         let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
                             width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
-        return almostFull ? almost : layout.tiles
+        return almostFull ? almost : Layout(area: screen.frame).tiles
     }
 
     /// each other screen's windows and their places there
@@ -2008,7 +2009,7 @@ final class Tiler {
         // Almost Full: right under the top (the menu bar, or the apps' strip where it hides), `tileGap` from the other edges
         let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
                             width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
-        return almostFull ? almost : layout.tiles
+        return almostFull ? almost : Layout(area: screen.frame).tiles
     }
 
     private func places() -> [NSRect] {
@@ -2335,7 +2336,7 @@ final class Tiler {
     func resizeFocused(wholeScreen: Bool) {
         guard let window = focusedWindow(), let screen = NSScreen.screens.first else { return }
         if on { on = false }
-        let to = wholeScreen ? screen.visibleFrame : Layout(area: screen.visibleFrame).tiles.integral
+        let to = wholeScreen ? screen.visibleFrame : Layout(area: screen.frame).tiles.integral
         guard let from = frame(of: window.element) else { return }
         animate([Move(window: window, from: from, to: to)])
     }
