@@ -1655,9 +1655,37 @@ final class Tiler {
         let screens = NSScreen.screens
         return others.flatMap { k, list -> [(TiledWindow, NSRect)] in
             guard k < screens.count, !list.isEmpty else { return [] }
-            let frames = arrangement.frames(count: list.count, in: area(of: screens[k]), shares: [:]).map(\.integral)
+            let frames = arrangement.frames(count: list.count, in: area(of: screens[k]), shares: shares[otherKey(k, list.count)] ?? [:]).map(\.integral)
             return Array(zip(list, frames))
         }
+    }
+
+    /// each other screen's shares as resized, per arrangement, number of windows and desktop
+    private func otherKey(_ screen: Int, _ count: Int) -> String { "\(arrangement.rawValue) \(count) \(Desktops.shared.current) screen \(screen)" }
+
+    /// A window on another screen being resized with the mouse: the others there give way as it goes (its
+    /// screen's shares follow it). True if one is.
+    private func resizingElsewhere() -> Bool {
+        let screens = NSScreen.screens
+        for (k, list) in others where k < screens.count {
+            for (i, window) in list.enumerated() {
+                guard let now = frame(of: window.element), let was = settled[window],
+                      abs(now.width - was.width) > 2 || abs(now.height - was.height) > 2 else { continue }
+                let area = area(of: screens[k])
+                let key = otherKey(k, list.count)
+                let slots = arrangement.frames(count: list.count, in: area, shares: shares[key] ?? [:]).map(\.integral)
+                guard pull(i, count: list.count, slots: slots, area: area, key: key, to: now) else { return true }
+                let next = arrangement.frames(count: list.count, in: area, shares: shares[key] ?? [:]).map(\.integral)
+                for (j, other) in list.enumerated() where j != i {
+                    setFrame(of: other.element, to: next[j], exact: true)
+                    settled[other] = frame(of: other.element) ?? next[j]
+                }
+                // its own edges where they now are: only further pulls count
+                settled[window] = now
+                return true
+            }
+        }
+        return false
     }
 
     /// A window on another screen moved by hand: dropped on another's place there, they trade; brought to the
@@ -1899,6 +1927,8 @@ final class Tiler {
     /// While the mouse is down: show where a dragged window would go, or let the others give way
     /// to one being resized.
     private func dragging() {
+        // a window being resized on another screen: its neighbours there give way
+        if animation == nil, !arrangement.stacks, resizingElsewhere() { resizedElsewhere = true; return }
         guard animation == nil, order.count > 1, !arrangement.stacks else { return }
         if dragged == nil && resizing == nil {
             if let k = resizedWindow() { resizing = k } else { dragged = movedWindow()?.index }
@@ -1916,11 +1946,18 @@ final class Tiler {
 
     /// The mouse is up (or something moved a window): a window dropped on another's place swaps with it;
     /// anything moved or resized goes back to its place.
+    /// a window was resized on another screen while the mouse was down: all laid out by the new shares when it is let go
+    private var resizedElsewhere = false
+
     private func released(at point: NSPoint?) {
         overlay.hide()
         dragged = nil
         resizing = nil
         guard on, animation == nil else { return }
+        if resizedElsewhere {
+            resizedElsewhere = false
+            return retile()
+        }
         if releasedElsewhere(at: point) { return }
         if let moved = movedWindow() {
             // dragged onto another screen: tiled there now; the others here close up
@@ -1996,9 +2033,16 @@ final class Tiler {
     /// Each edge of window `k` that is no longer where its place has it moves the cut between its part and
     /// the neighbouring one (the nearest cut that way), to where the edge now is. Whether anything changed.
     private func pull(_ k: Int, to now: NSRect) -> Bool {
-        guard k < order.count, slots.count == order.count, let area = tilingArea() else { return false }
+        guard let area = tilingArea() else { return false }
+        return pull(k, count: order.count, slots: slots, area: area, key: sharesKey, to: now)
+    }
+
+    /// The shares of a screen's parts changed so the k-th of its `count` windows (in `slots`, within `area`)
+    /// has the edges it was pulled to; kept under `key`. Whether they changed.
+    private func pull(_ k: Int, count: Int, slots: [NSRect], area: NSRect, key: String, to now: NSRect) -> Bool {
+        guard k < count, slots.count == count else { return false }
         let slot = slots[k]
-        var mine = shares[sharesKey] ?? [:]
+        var mine = shares[key] ?? [:]
         // the cuts around this window, the nearest first: its part's place among the others
         var around: [(path: String, across: Bool, rects: [NSRect], at: Int)] = []
         func find(_ cut: Cut, _ r: NSRect, _ path: String) -> Bool {
@@ -2013,7 +2057,7 @@ final class Tiler {
                 return false
             }
         }
-        _ = find(arrangement.cut(count: order.count), area, "")
+        _ = find(arrangement.cut(count: count), area, "")
         // left, right, top, bottom: whether the edge runs across, whether the neighbour comes after, and the
         // part's new size for the edge where the window now has it
         let edges: [(across: Bool, after: Bool, pulled: CGFloat, size: (NSRect) -> CGFloat)] = [
@@ -2038,7 +2082,7 @@ final class Tiler {
             mine[cut.path] = sizes
             changed = true
         }
-        if changed { shares[sharesKey] = mine }
+        if changed { shares[key] = mine }
         return changed
     }
 
