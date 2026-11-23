@@ -3948,27 +3948,8 @@ enum YouTubeWallpaper {
 // says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
 // still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
 
-/// The face: a life of 90 years as a line (as the day's on the desk), UNLOCK at the bottom, and in the bottom left corner a small
-/// diamond that sets the birthday the weeks count from. Over the wallpaper, in the apps' small letters.
+/// The face: SPACE down the screen's middle, UNLOCK at the bottom. Over the wallpaper, in the apps' small letters.
 let lockLetters = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
-
-/// The birthday the life calendar counts from, kept between launches.
-var birthday: Date? {
-    get { UserDefaults.standard.object(forKey: "birthday") as? Date }
-    set { UserDefaults.standard.set(newValue, forKey: "birthday") }
-}
-
-/// The birthday's field: Return or Escape puts it away.
-final class BirthdayField: NSDatePicker {
-    var done: () -> Void = {}
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_Escape) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) {
-            done()
-        } else {
-            super.keyDown(with: event)
-        }
-    }
-}
 
 final class LockWindow: NSWindow {
     override var canBecomeKey: Bool { true }
@@ -3978,12 +3959,8 @@ final class LockWindow: NSWindow {
 final class LockFace: NSView {
     /// `asked`: UNLOCK clicked or Return pressed, which brings the system's prompt even while Touch ID waits
     var unlock: (_ asked: Bool) -> Void = { _ in }
-    /// the screen with the calendar and UNLOCK (the others only show the wallpaper)
+    /// the screen with SPACE and UNLOCK (the others only show the wallpaper)
     let main: Bool
-    private var field: BirthdayField?
-
-    /// a life of 90 years
-    static let years = 90
 
     init(frame: NSRect, main: Bool) {
         self.main = main
@@ -3995,19 +3972,11 @@ final class LockFace: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// the birthday diamond, just under the life line
-    private var corner: NSPoint {
-        NSPoint(x: bounds.midX, y: bounds.midY - 9 - 24)
-    }
-
     override func mouseDown(with event: NSEvent) {
         guard main else { return unlock(false) }
-        let point = convert(event.locationInWindow, from: nil)
-        if field != nil { return closeBirthday() }
-        if hypot(point.x - corner.x, point.y - corner.y) < 18 { return openBirthday() }
-        unlock(unlockPlace.contains(point))
+        unlock(unlockPlace.contains(convert(event.locationInWindow, from: nil)))
     }
-    override func rightMouseDown(with event: NSEvent) { if field == nil { unlock(false) } }
+    override func rightMouseDown(with event: NSEvent) { unlock(false) }
     override func keyDown(with event: NSEvent) {
         let enter = event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter)
         unlock(enter)
@@ -4018,48 +3987,9 @@ final class LockFace: NSView {
         NSRect(x: bounds.midX - 160, y: bounds.minY + bounds.height * 0.0625 - 16, width: 320, height: 52)
     }
 
-    private func openBirthday() {
-        let field = BirthdayField(frame: .zero)
-        field.datePickerStyle = .textField
-        field.datePickerElements = .yearMonthDay
-        field.isBezeled = false
-        field.isBordered = false
-        field.drawsBackground = false
-        field.textColor = ink(0.95)
-        field.font = lockLetters
-        field.maxDate = Date()
-        field.dateValue = birthday ?? Calendar.current.date(from: DateComponents(year: 1995, month: 1, day: 1)) ?? Date()
-        field.target = self
-        field.action = #selector(birthdayChanged(_:))
-        field.done = { [weak self] in self?.closeBirthday() }
-        field.sizeToFit()
-        field.setFrameOrigin(NSPoint(x: corner.x + 18, y: corner.y - field.frame.height / 2))
-        addSubview(field)
-        window?.makeFirstResponder(field)
-        self.field = field
-        // set at once, so the weeks show while the date is being typed
-        birthday = field.dateValue
-        needsDisplay = true
-    }
-
-    @objc private func birthdayChanged(_ sender: NSDatePicker) {
-        birthday = sender.dateValue
-        needsDisplay = true
-    }
-
-    private func closeBirthday() {
-        guard let field else { return }
-        birthday = field.dateValue
-        field.removeFromSuperview()
-        self.field = nil
-        window?.makeFirstResponder(self)
-        needsDisplay = true
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
-        drawLife()
-        drawDiamond(at: corner, color: field != nil ? ink(0.95) : strong)
+        drawWord()
         let hint = NSAttributedString(string: tr("UNLOCK"), attributes: [
             .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
         ])
@@ -4067,26 +3997,16 @@ final class LockFace: NSView {
         hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// A life of 90 years as a line like the day's on the desk, MORI down over it: filled as far as lived, a mark at
-    /// its middle (45). Without a birthday, nothing filled.
-    private func drawLife() {
-        let width = bounds.width * 0.24
-        let line = NSRect(x: bounds.midX - width / 2, y: bounds.midY - 9, width: width, height: 18)
-        var gone = 0.0
-        if let birthday, let end = Calendar.current.date(byAdding: .year, value: LockFace.years, to: birthday) {
-            gone = Date().timeIntervalSince(birthday) / end.timeIntervalSince(birthday)
-        }
-        drawBar(in: NSRect(x: line.minX, y: line.midY - barWidth / 2, width: line.width, height: barWidth), filled: gone, vertical: false)
-        strong.setFill()
-        NSRect(x: line.midX - 0.75, y: line.minY, width: 1.5, height: line.height).fill()
-        // MORI over it, down the screen as the desk's words and the apps' side buttons: a letter to a step
-        let words = tr("MORI")
+    /// SPACE down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
+    private func drawWord() {
+        let words = tr("SPACE")
         let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: ink(0.5)]
-        let bottom = line.maxY + 24
-        for (i, letter) in words.reversed().enumerated() where letter != " " {
+        let letters = words.filter { $0 != " " }
+        let bottom = bounds.midY - CGFloat(letters.count) * letterStep / 2
+        for (i, letter) in letters.reversed().enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
             let size = text.size()
-            text.draw(at: NSPoint(x: line.midX - size.width / 2, y: bottom + CGFloat(i) * letterStep + (letterStep - size.height) / 2))
+            text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bottom + CGFloat(i) * letterStep + (letterStep - size.height) / 2))
         }
     }
 }
@@ -5726,7 +5646,7 @@ final class Desk: NSObject, NSApplicationDelegate {
     private var otherStrips: [DeskWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // ReDesk shows no menu bar, but its fields (the YouTube link, the birthday) still want ⌘X ⌘C ⌘V ⌘A ⌘Z:
+        // ReDesk shows no menu bar, but its fields (the YouTube link) still want ⌘X ⌘C ⌘V ⌘A ⌘Z:
         // key equivalents reach them through a main menu, so it has an Edit menu nobody sees
         let edit = NSMenu(title: "Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
