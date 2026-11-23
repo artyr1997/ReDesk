@@ -982,7 +982,7 @@ struct Shortcut: Equatable {
             kVK_ANSI_Equal: "=", kVK_ANSI_Grave: "`",
             kVK_Return: "↩", kVK_Space: "Space", kVK_Tab: "⇥", kVK_Delete: "⌫", kVK_ForwardDelete: "⌦", kVK_Escape: "Esc",
             kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
-            kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟",
+            kVK_Home: "fn←", kVK_End: "fn→", kVK_PageUp: "fn↑", kVK_PageDown: "fn↓",
         ]
         let f = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12]
         for (i, key) in f.enumerated() { names[key] = "F\(i + 1)" }
@@ -1143,16 +1143,17 @@ enum DeskKey: String, CaseIterable {
         case .promote: return Shortcut(key: kVK_Return, flags: ctrlAlt)
         case .pin: return Shortcut(key: kVK_ANSI_P, flags: ctrlAlt)
         case .otherScreen: return Shortcut(key: kVK_ANSI_O, flags: ctrlAlt)
-        case .sidesIn: return Shortcut(key: kVK_ANSI_Minus, flags: ctrlAlt)
-        case .sidesOut: return Shortcut(key: kVK_ANSI_Equal, flags: ctrlAlt)
-        case .wordsIn: return Shortcut(key: kVK_ANSI_LeftBracket, flags: ctrlAlt)
-        case .wordsOut: return Shortcut(key: kVK_ANSI_RightBracket, flags: ctrlAlt)
+        // fn and an arrow (Home, End, Page Up, Page Down): ← → across, ↓ ↑ down
+        case .sidesIn: return Shortcut(key: kVK_Home, flags: [])
+        case .sidesOut: return Shortcut(key: kVK_End, flags: [])
+        case .wordsIn: return Shortcut(key: kVK_PageDown, flags: [])
+        case .wordsOut: return Shortcut(key: kVK_PageUp, flags: [])
         }
     }
 
     /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
     var anywhere: Bool {
-        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen, .sidesIn, .sidesOut, .wordsIn, .wordsOut].contains(self)
+        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen].contains(self)
     }
 
     var shortcut: Shortcut {
