@@ -19,6 +19,8 @@ cp -R wallpapers "$APP/Contents/Resources/"
 # Signed as well as the keychain allows: with a Developer ID Application certificate for others' Macs (the
 # hardened runtime and a timestamp, as notarizing wants); else with an Apple Development one (this Mac); else ad
 # hoc. The team is in the requirement, so the permissions given (Accessibility and the like) outlive rebuilds.
+# the symbols only a debugger reads left out, so the download stays small
+strip -x "$APP/Contents/MacOS/ReDesk"
 IDENTITIES=$(security find-identity -v -p codesigning)
 IDENTITY=$(echo "$IDENTITIES" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
 RUNTIME="--options runtime --timestamp --entitlements ReDesk.entitlements"
