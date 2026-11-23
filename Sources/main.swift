@@ -2015,9 +2015,34 @@ final class Tiler {
     func resize(_ direction: Direction) {
         // no waiting for a glide to end: the places are where the windows are going, and a new glide starts
         // from wherever they are
-        guard on, !arrangement.stacks, AXIsProcessTrusted(), let window = focusedWindow(),
-              let k = order.firstIndex(of: window), slots.count == order.count else { return }
+        guard on, !arrangement.stacks, AXIsProcessTrusted() else { return }
         let step: CGFloat = direction == .right || direction == .up ? 80 : -80
+        /// the place pulled by a step: its right (lower) border, else its left (upper)
+        func pulled(_ slot: NSRect) -> (NSRect, NSRect) {
+            var first = slot, second = slot
+            if direction == .left || direction == .right {
+                first.size.width += step
+                second.origin.x += step; second.size.width -= step
+            } else {
+                first.origin.y += step; first.size.height -= step
+                second.size.height += step
+            }
+            return (first, second)
+        }
+        // a window on another screen: that screen's shares
+        if focusedWindow() == nil, let window = focusedReWindow() {
+            refreshOthers()
+            let screens = NSScreen.screens
+            guard let (k, list) = others.first(where: { $0.value.contains(window) }), k < screens.count,
+                  let i = list.firstIndex(of: window) else { return }
+            let area = area(of: screens[k]), key = otherKey(k, list.count)
+            let places = arrangement.frames(count: list.count, in: area, shares: shares[key] ?? [:]).map(\.integral)
+            let (first, second) = pulled(places[i])
+            guard pull(i, count: list.count, slots: places, area: area, key: key, to: first)
+                    || pull(i, count: list.count, slots: places, area: area, key: key, to: second) else { return }
+            return retile()
+        }
+        guard let window = focusedWindow(), let k = order.firstIndex(of: window), slots.count == order.count else { return }
         var first = slots[k], second = slots[k]
         if direction == .left || direction == .right {
             first.size.width += step                             // the right border
@@ -2173,6 +2198,16 @@ final class Tiler {
         let w = min(now.width, there.width * 0.9), h = min(now.height, there.height * 0.9)
         setFrame(of: window, to: NSRect(x: there.midX - w / 2, y: there.midY - h / 2, width: w, height: h), exact: true)
         if on { lookNow(); retile() }
+    }
+
+    /// the window that has the keyboard, if it is one of the Re apps', on whichever screen
+    private func focusedReWindow() -> TiledWindow? {
+        guard let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute) else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(app as! AXUIElement, &pid) == .success,
+              tiledApps.contains(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""),
+              let focused = attribute(app as! AXUIElement, kAXFocusedWindowAttribute) else { return nil }
+        return TiledWindow(element: focused as! AXUIElement)
     }
 
     /// The window that has the keyboard, if it is one of the Re apps'.
