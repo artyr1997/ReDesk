@@ -988,7 +988,7 @@ enum Settable: Equatable {
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
     case settings, keys, lock, appearance, language, stillWallpaper, blurWallpaper
-    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin
+    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen
 
     /// its line in the popup
     var title: String {
@@ -1007,6 +1007,7 @@ enum DeskKey: String, CaseIterable {
         case .nextArrangement: "next arrangement"
         case .promote: "the window becomes the main one"
         case .pin: "pin the window to its place"
+        case .otherScreen: "the window to the other screen"
         }
     }
 
@@ -1028,12 +1029,13 @@ enum DeskKey: String, CaseIterable {
         case .nextArrangement: return Shortcut(key: kVK_Space, flags: ctrlAlt)
         case .promote: return Shortcut(key: kVK_Return, flags: ctrlAlt)
         case .pin: return Shortcut(key: kVK_ANSI_P, flags: ctrlAlt)
+        case .otherScreen: return Shortcut(key: kVK_ANSI_O, flags: ctrlAlt)
         }
     }
 
     /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
     var anywhere: Bool {
-        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin].contains(self)
+        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen].contains(self)
     }
 
     var shortcut: Shortcut {
@@ -1065,6 +1067,7 @@ enum DeskKey: String, CaseIterable {
         case .nextArrangement: Tiler.shared.nextArrangement()
         case .promote: Tiler.shared.promote()
         case .pin: Tiler.shared.togglePin()
+        case .otherScreen: Tiler.shared.toOtherScreen()
         }
     }
 }
@@ -1777,6 +1780,8 @@ final class Tiler {
                             && attribute(w, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
                             && attribute(w, kAXMinimizedAttribute) as? Bool != true
                             && attribute(w, "AXFullScreen") as? Bool != true
+                            // on another screen (an external display): free, the desk's tiling is the main screen's
+                            && !Tiler.onOtherScreen(w)
                     }
                     .map { TiledWindow(element: $0) }
             }
@@ -1826,6 +1831,12 @@ final class Tiler {
         resizing = nil
         guard on, animation == nil else { return }
         if let moved = movedWindow() {
+            // dragged onto another screen: it stays there, free; the others close up
+            if Tiler.onOtherScreen(order[moved.index].element) {
+                lookNow()
+                retile()
+                return
+            }
             let drop = point ?? NSPoint(x: moved.frame.midX, y: moved.frame.midY)
             if !arrangement.stacks, let target = slots.firstIndex(where: { $0.contains(drop) }), target != moved.index,
                pinned[order[moved.index]] == nil, pinned[order[target]] == nil {
@@ -1997,6 +2008,33 @@ final class Tiler {
     }
 
     enum Direction { case left, right, up, down }
+
+    /// a window whose middle is on another screen than the main one
+    static func onOtherScreen(_ window: AXUIElement) -> Bool {
+        guard NSScreen.screens.count > 1, let f = frame(of: window) else { return false }
+        let middle = NSPoint(x: f.midX, y: f.midY)
+        return NSScreen.screens.dropFirst().contains { $0.frame.contains(middle) }
+    }
+
+    /// ⌃⌥O: the window with the keyboard to the next screen, in its middle, as large as fits there; on the
+    /// main screen it is tiled with the others, on another it is free. The windows left close up.
+    func toOtherScreen() {
+        guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
+        let screens = NSScreen.screens
+        guard screens.count > 1,
+              let app = attribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
+              let pid = Optional(app as! AXUIElement).flatMap({ el -> pid_t? in var p: pid_t = 0; return AXUIElementGetPid(el, &p) == .success ? p : nil }),
+              tiledApps.contains(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""),
+              let focused = attribute(app as! AXUIElement, kAXFocusedWindowAttribute),
+              let now = frame(of: focused as! AXUIElement) else { return }
+        let window = focused as! AXUIElement
+        let middle = NSPoint(x: now.midX, y: now.midY)
+        let here = screens.firstIndex { $0.frame.contains(middle) } ?? 0
+        let there = screens[(here + 1) % screens.count].visibleFrame
+        let w = min(now.width, there.width * 0.9), h = min(now.height, there.height * 0.9)
+        setFrame(of: window, to: NSRect(x: there.midX - w / 2, y: there.midY - h / 2, width: w, height: h), exact: true)
+        if on { lookNow(); retile() }
+    }
 
     /// The window that has the keyboard, if it is one of the Re apps'.
     private func focusedWindow() -> TiledWindow? {
@@ -5109,7 +5147,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
                          ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
-                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", "")]),
+                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", "")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
             ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
                           ("⌥← / ⌥→", "previous / next wallpaper")]),

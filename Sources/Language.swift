@@ -233,7 +233,7 @@ private let japaneseWords: [String: String] = [
     "pen / brush / rubber": "ペン / 筆 / 消しゴム",
     "the trackpad as a tablet": "トラックパッドをタブレットに",
     "line": "線の太さ",
-    "undo / redo": "取り消す / やり直す", "choose more cells": "セルをまとめて選ぶ", "copy / cut / paste": "コピー / 切り取り / 貼り付け",
+    "undo / redo": "取り消す / やり直す", "the window to the other screen": "ウィンドウを別の画面へ", "choose more cells": "セルをまとめて選ぶ", "copy / cut / paste": "コピー / 切り取り / 貼り付け",
     "clear": "消去",
     "nearer / further": "拡大 / 縮小",
     "as it was": "元の大きさ",
