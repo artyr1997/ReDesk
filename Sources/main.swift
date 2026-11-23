@@ -3404,6 +3404,8 @@ final class Meter {
 
     func start() {
         guard !running else { return }
+        // the system's sound is heard from macOS 14.2 on; before it the wave stays still
+        guard #available(macOS 14.2, *) else { return }
         running = true
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.uuid = UUID()
@@ -3452,7 +3454,7 @@ final class Meter {
             }
             AudioHardwareDestroyAggregateDevice(device)
         }
-        if tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
+        if #available(macOS 14.2, *), tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
         tap = AudioObjectID(kAudioObjectUnknown)
         device = AudioObjectID(kAudioObjectUnknown)
         proc = nil

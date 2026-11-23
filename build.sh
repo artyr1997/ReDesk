@@ -5,7 +5,12 @@ cd "$(dirname "$0")"
 APP=build/ReDesk.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swiftc -O -o "$APP/Contents/MacOS/ReDesk" Sources/*.swift
+# for every Mac from macOS 13 on, Apple silicon and Intel both
+for ARCH in arm64 x86_64; do
+  swiftc -O -module-name ReDesk -target $ARCH-apple-macos13.0 -o "build/ReDesk-$ARCH" Sources/*.swift
+done
+lipo -create -output "$APP/Contents/MacOS/ReDesk" build/ReDesk-arm64 build/ReDesk-x86_64
+rm -f build/ReDesk-arm64 build/ReDesk-x86_64
 cp Info.plist "$APP/Contents/"
 cp Resources/* "$APP/Contents/Resources/"
 cp -R wallpapers "$APP/Contents/Resources/"
