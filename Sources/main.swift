@@ -1173,8 +1173,10 @@ enum DeskKey: String, CaseIterable {
     /// in front, the desk's.
     private func spacing(_ axis: String, _ way: Int, desk: () -> Void) {
         if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, tiledApps.contains(front) {
+            // with A held (fn A and the arrows): the app in front sets its own, then gives the same to the others
+            let all = CommandKeys.allHeld ? " all" : ""
             DistributedNotificationCenter.default().postNotificationName(
-                Notification.Name("com.artursavytskyi.re.spacing"), object: "\(front) \(axis) \(way)", userInfo: nil, deliverImmediately: true)
+                Notification.Name("com.artursavytskyi.re.spacing"), object: "\(front) \(axis) \(way)\(all)", userInfo: nil, deliverImmediately: true)
         } else {
             desk()
         }
@@ -1216,6 +1218,11 @@ enum CommandKeys {
     private static var tap: CFMachPort?
     /// a key being set in the popup: every key goes to it
     static var recording = false
+    /// A held down with fn: the distances' keys set every app's at once
+    static var allHeld = false
+
+    /// the desk or a Re app in front (for the tap, before any key's action)
+    static func oursInFrontNow() -> Bool { oursInFront() }
 
     /// Tries now and again later: the tap can only be made once the permission is given.
     static func install() {
@@ -1224,13 +1231,28 @@ enum CommandKeys {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { install() }
             return
         }
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue) | CGEventMask(1 << CGEventType.keyUp.rawValue)
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                            eventsOfInterest: mask, callback: { _, type, event, _ in
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 if let tap = CommandKeys.tap { CGEvent.tapEnable(tap: tap, enable: true) }
                 return Unmanaged.passUnretained(event)
             }
+            // fn with A held: the distances set by the arrows go to every app (A itself is kept, typing nothing)
+            let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
+            if key == kVK_ANSI_A {
+                if type == .keyUp {
+                    guard CommandKeys.allHeld else { return Unmanaged.passUnretained(event) }
+                    CommandKeys.allHeld = false
+                    return nil
+                }
+                let others = event.flags.intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate])
+                if event.flags.contains(.maskSecondaryFn) && others.isEmpty && (CommandKeys.allHeld || CommandKeys.oursInFrontNow()) {
+                    CommandKeys.allHeld = true
+                    return nil
+                }
+            }
+            guard type == .keyDown else { return Unmanaged.passUnretained(event) }
             guard let action = CommandKeys.action(for: event) else { return Unmanaged.passUnretained(event) }
             DispatchQueue.main.async(execute: action)
             return nil
@@ -5517,7 +5539,8 @@ final class KeysPopup: Popup {
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
                          ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
                          ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""),
-                         ("@sidesIn", ""), ("@sidesOut", ""), ("@wordsIn", ""), ("@wordsOut", "")]),
+                         ("@sidesIn", ""), ("@sidesOut", ""), ("@wordsIn", ""), ("@wordsOut", ""),
+                         ("fn A ← → ↑ ↓", "the same in every app's windows")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
             ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
                           ("⌥← / ⌥→", "previous / next wallpaper")]),
