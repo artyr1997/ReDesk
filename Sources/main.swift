@@ -5664,7 +5664,7 @@ final class Desk: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(layout), name: .wallpapersListed, object: nil)
         // the side columns moved (⌃⌥- / ⌃⌥=): the desk laid out again, the windows tiled again
         NotificationCenter.default.addObserver(forName: SideMargin.changed, object: nil, queue: .main) { [weak self] _ in
-            self?.layout()
+            self?.placePieces()
         }
         NotificationCenter.default.addObserver(self, selector: #selector(languageChanged), name: Language.changed, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -5800,6 +5800,14 @@ final class Desk: NSObject, NSApplicationDelegate {
         WallpaperBlur.refresh()
         Tiler.shared.retile()
         showBar()
+    }
+
+    /// Only the desk's words and dashes put in their places again, and the windows tiled again (the side
+    /// columns moved): the wallpaper, a film perhaps, left playing as it is.
+    private func placePieces() {
+        if let screen = NSScreen.screens.first { windows.forEach { $0.place(on: screen) } }
+        for (set, screen) in zip(others, NSScreen.screens.dropFirst()) { set.forEach { $0.place(on: screen) } }
+        Tiler.shared.retile()
     }
 
     /// The screens changed (a display plugged in or out, the lid shut on one): laid out now, and again once
