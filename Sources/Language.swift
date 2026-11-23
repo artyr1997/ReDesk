@@ -138,6 +138,7 @@ private let japaneseWords: [String: String] = [
     // ── keys ──
     "⌘/ or Esc closes  ·  ⌘, settings": "⌘/ か Esc で閉じる  ·  ⌘, 設定",
     "or Esc closes": "か Esc で閉じる",
+    "Table": "表", "write in a cell": "セルに書く", "add a column / row": "列 / 行を追加", "delete the row / column": "行 / 列を削除",
     "press the keys…": "キーを押す…",
     "click a key to set your own, ⌫ for its own again": "キーをクリックして自分のキーに、⌫ で元に戻す",
     "Windows": "ウィンドウ",
