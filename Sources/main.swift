@@ -1640,7 +1640,10 @@ final class Tiler {
 
     /// where the windows share on a screen: as on the main one (the middle, all of it in Full, nearly all in Almost Full)
     private func area(of screen: NSScreen) -> NSRect {
-        let layout = Layout(area: screen.visibleFrame)
+        // under the apps across the top, where they stand on the desk
+        var visible = screen.visibleFrame
+        visible.size.height -= appStripRoom(screen)
+        let layout = Layout(area: visible)
         if arrangement == .full { return layout.area }
         let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
                             width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
@@ -2501,6 +2504,13 @@ final class WordView: DeskView {
 /// a click goes to one (or opens it). In the Mac's menu bar while it stays; where it hides (it comes
 /// only when the mouse goes up), on the desk in its place (AppStripView), the menu bar coming over it.
 var menuBarHides: Bool { UserDefaults.standard.bool(forKey: "_HIHideMenuBar") }
+
+/// On another screen than the main one, the room the apps across the top take where it has no menu bar of
+/// its own (an external display, the menu bar hidden or only on the main screen): the menu bar's height.
+func appStripRoom(_ screen: NSScreen) -> CGFloat {
+    guard screen != NSScreen.screens.first, Tiler.shared.showsApps else { return 0 }
+    return screen.frame.maxY - screen.visibleFrame.maxY < 1 ? NSStatusBar.system.thickness : 0
+}
 
 private let appWordFont = NSFont(name: "NotoSansJP-Regular", size: 15) ?? .systemFont(ofSize: 15, weight: .light)
 
@@ -5419,6 +5429,8 @@ final class Desk: NSObject, NSApplicationDelegate {
     private let strip = AppStripView()
     /// placed by showStrip(), over the strip the hidden menu bar leaves at the top of the screen
     private lazy var stripWindow = DeskWindow(view: strip) { l in l.area }
+    /// the apps across the top of the other screens (an external display), in Full Screen and Almost Full
+    private var otherStrips: [DeskWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // ReDesk shows no menu bar, but its fields (the YouTube link, the birthday) still want ⌘X ⌘C ⌘V ⌘A ⌘Z:
@@ -5626,6 +5638,20 @@ final class Desk: NSObject, NSApplicationDelegate {
     private func showBar() {
         let full = Tiler.shared.showsApps
         AppMenuBar.shared.shown = full && !menuBarHides
+        // the other screens: the words across their top where they have no menu bar showing them
+        let extra = Array(NSScreen.screens.dropFirst())
+        while otherStrips.count < extra.count { otherStrips.append(DeskWindow(view: AppStripView()) { l in l.area }) }
+        for (i, window) in otherStrips.enumerated() {
+            guard i < extra.count, full else { window.orderOut(nil); continue }
+            let screen = extra[i]
+            let room = appStripRoom(screen)
+            let menu = screen.frame.maxY - screen.visibleFrame.maxY
+            // its own (hidden) menu bar's place, or a band of that height at its top
+            let height = room > 0 ? room : (menuBarHides ? menu : 0)
+            guard height > 0 else { window.orderOut(nil); continue }
+            window.setFrame(NSRect(x: screen.frame.minX, y: screen.frame.maxY - height, width: screen.frame.width, height: height), display: true)
+            window.orderFront(nil)
+        }
         guard full && menuBarHides, let screen = NSScreen.screens.first, screen.frame.maxY > screen.visibleFrame.maxY else {
             return stripWindow.orderOut(nil)
         }
