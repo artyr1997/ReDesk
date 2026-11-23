@@ -119,6 +119,63 @@ struct SideMargin {
         guard next != now else { return NSSound.beep() }
         UserDefaults.standard.set(Double(next), forKey: key(screen))
         NotificationCenter.default.post(name: Self.changed, object: nil)
+        // the lines it sets, across the whole screen for a moment
+        Guides.shared.show(on: screen)
+    }
+}
+
+/// While the distances are set by keys: thin lines across the whole screen, down through the side columns
+/// and the windows' sides, across at the windows' top and foot (where the corner words begin); they fade a
+/// moment after the last key.
+final class Guides {
+    static let shared = Guides()
+
+    private final class Lines: NSView {
+        var xs: [CGFloat] = [], ys: [CGFloat] = []
+        override func draw(_ dirtyRect: NSRect) {
+            let path = NSBezierPath()
+            for x in xs { path.move(to: NSPoint(x: x.rounded() + 0.5, y: bounds.minY)); path.line(to: NSPoint(x: x.rounded() + 0.5, y: bounds.maxY)) }
+            for y in ys { path.move(to: NSPoint(x: bounds.minX, y: y.rounded() + 0.5)); path.line(to: NSPoint(x: bounds.maxX, y: y.rounded() + 0.5)) }
+            path.lineWidth = 1
+            ink(0.35).setStroke()
+            path.stroke()
+        }
+    }
+
+    private let window = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+    private let lines = Lines()
+    private var hiding: DispatchWorkItem?
+
+    init() {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        window.contentView = lines
+        window.alphaValue = 0
+    }
+
+    func show(on screen: NSScreen) {
+        let f = screen.frame
+        let l = Layout(area: f)
+        let tiles = l.tiles
+        // in the window's own points (from the screen's bottom left)
+        lines.xs = [l.leftX, l.rightX, tiles.minX, tiles.maxX].map { $0 - f.minX }
+        lines.ys = [l.topWord, l.bottomWord].map { $0 - f.minY }
+        window.setFrame(f, display: true)
+        lines.needsDisplay = true
+        window.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.15; window.animator().alphaValue = 1 }
+        hiding?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            NSAnimationContext.runAnimationGroup({ $0.duration = 0.5; self.window.animator().alphaValue = 0 },
+                                                 completionHandler: { if self.window.alphaValue == 0 { self.window.orderOut(nil) } })
+        }
+        hiding = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
     }
 }
 
