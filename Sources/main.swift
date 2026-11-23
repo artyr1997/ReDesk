@@ -73,35 +73,51 @@ func open(_ corner: Corner) {
 
 // ── the desk's layout: the apps' insets, 5% of the width from the sides, 6.25% of the height ──
 
-/// How far the side columns (the corner words, the desktops' and wallpapers' dashes) stand from the
-/// screen's edges, as a share of its width: set by keys (⌃⌥- nearer, ⌃⌥= further), kept, the same on every
-/// screen. The tiled windows keep as far again from the columns.
+/// How far the side columns (the corner words, the desktops' and wallpapers' dashes) stand from a screen's
+/// edges, as a share of its width: each screen its own (kept by the display, so a monitor plugged in again
+/// finds it), set by keys on the screen the mouse is on (⌃⌥- nearer, ⌃⌥= further). The tiled windows keep as
+/// far again from the columns.
 enum SideMargin {
-    static let key = "sideMargin"
     static let changed = Notification.Name("ReDeskSideMarginChanged")
     static let least: CGFloat = 0.02, most: CGFloat = 0.15, step: CGFloat = 0.005
+    /// a screen not set yet: as all were set before each had its own, else 5%
+    static var usual: CGFloat { (UserDefaults.standard.object(forKey: "sideMargin") as? Double).map { CGFloat($0) } ?? 0.05 }
 
-    static var share: CGFloat {
-        get { (UserDefaults.standard.object(forKey: key) as? Double).map { CGFloat($0) } ?? 0.05 }
-        set {
-            UserDefaults.standard.set(Double(min(most, max(least, newValue))), forKey: key)
-            NotificationCenter.default.post(name: changed, object: nil)
-        }
+    /// a screen's own key: its display's UUID (the same each time it is plugged in)
+    private static func key(_ screen: NSScreen) -> String {
+        let number = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        let uuid = CGDisplayCreateUUIDFromDisplayID(number).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "\(number)"
+        return "sideMargin." + uuid
     }
 
-    /// a step nearer the edges (-1) or further from them (1)
+    static func share(of screen: NSScreen) -> CGFloat {
+        (UserDefaults.standard.object(forKey: key(screen)) as? Double).map { CGFloat($0) } ?? usual
+    }
+
+    /// the share for a place laid out on a screen (the screen holding its middle)
+    static func share(for area: NSRect) -> CGFloat {
+        let middle = NSPoint(x: area.midX, y: area.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(middle) }) ?? NSScreen.screens.first else { return usual }
+        return share(of: screen)
+    }
+
+    /// a step nearer the edges (-1) or further from them (1), on the screen the mouse is on
     static func move(_ way: CGFloat) {
-        let next = min(most, max(least, share + way * step))
-        guard next != share else { return NSSound.beep() }
-        share = next
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.screens.first else { return }
+        let now = share(of: screen)
+        let next = min(most, max(least, now + way * step))
+        guard next != now else { return NSSound.beep() }
+        UserDefaults.standard.set(Double(next), forKey: key(screen))
+        NotificationCenter.default.post(name: changed, object: nil)
     }
 }
 
 struct Layout {
     let area: NSRect
 
-    var leftX: CGFloat { area.minX + area.width * SideMargin.share }
-    var rightX: CGFloat { area.maxX - area.width * SideMargin.share }
+    var leftX: CGFloat { area.minX + area.width * SideMargin.share(for: area) }
+    var rightX: CGFloat { area.maxX - area.width * SideMargin.share(for: area) }
     var topWord: CGFloat { area.maxY - area.height * 0.0625 }
     var bottomWord: CGFloat { area.minY + area.height * 0.0625 }
     /// the dots on the left and the battery on the right share this length, around the middle
