@@ -73,11 +73,35 @@ func open(_ corner: Corner) {
 
 // ── the desk's layout: the apps' insets, 5% of the width from the sides, 6.25% of the height ──
 
+/// How far the side columns (the corner words, the desktops' and wallpapers' dashes) stand from the
+/// screen's edges, as a share of its width: set by keys (⌃⌥- nearer, ⌃⌥= further), kept, the same on every
+/// screen. The tiled windows keep as far again from the columns.
+enum SideMargin {
+    static let key = "sideMargin"
+    static let changed = Notification.Name("ReDeskSideMarginChanged")
+    static let least: CGFloat = 0.02, most: CGFloat = 0.15, step: CGFloat = 0.005
+
+    static var share: CGFloat {
+        get { (UserDefaults.standard.object(forKey: key) as? Double).map { CGFloat($0) } ?? 0.05 }
+        set {
+            UserDefaults.standard.set(Double(min(most, max(least, newValue))), forKey: key)
+            NotificationCenter.default.post(name: changed, object: nil)
+        }
+    }
+
+    /// a step nearer the edges (-1) or further from them (1)
+    static func move(_ way: CGFloat) {
+        let next = min(most, max(least, share + way * step))
+        guard next != share else { return NSSound.beep() }
+        share = next
+    }
+}
+
 struct Layout {
     let area: NSRect
 
-    var leftX: CGFloat { area.minX + area.width * 0.05 }
-    var rightX: CGFloat { area.maxX - area.width * 0.05 }
+    var leftX: CGFloat { area.minX + area.width * SideMargin.share }
+    var rightX: CGFloat { area.maxX - area.width * SideMargin.share }
     var topWord: CGFloat { area.maxY - area.height * 0.0625 }
     var bottomWord: CGFloat { area.minY + area.height * 0.0625 }
     /// the dots on the left and the battery on the right share this length, around the middle
@@ -991,7 +1015,7 @@ enum Settable: Equatable {
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
     case settings, keys, lock, appearance, language, stillWallpaper, blurWallpaper
-    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen
+    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, sidesIn, sidesOut
 
     /// its line in the popup
     var title: String {
@@ -1011,6 +1035,8 @@ enum DeskKey: String, CaseIterable {
         case .promote: "the window becomes the main one"
         case .pin: "pin the window to its place"
         case .otherScreen: "the window to the other screen"
+        case .sidesIn: "the side columns nearer the edges"
+        case .sidesOut: "the side columns further from the edges"
         }
     }
 
@@ -1033,12 +1059,14 @@ enum DeskKey: String, CaseIterable {
         case .promote: return Shortcut(key: kVK_Return, flags: ctrlAlt)
         case .pin: return Shortcut(key: kVK_ANSI_P, flags: ctrlAlt)
         case .otherScreen: return Shortcut(key: kVK_ANSI_O, flags: ctrlAlt)
+        case .sidesIn: return Shortcut(key: kVK_ANSI_Minus, flags: ctrlAlt)
+        case .sidesOut: return Shortcut(key: kVK_ANSI_Equal, flags: ctrlAlt)
         }
     }
 
     /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
     var anywhere: Bool {
-        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen].contains(self)
+        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen, .sidesIn, .sidesOut].contains(self)
     }
 
     var shortcut: Shortcut {
@@ -1071,6 +1099,8 @@ enum DeskKey: String, CaseIterable {
         case .promote: Tiler.shared.promote()
         case .pin: Tiler.shared.togglePin()
         case .otherScreen: Tiler.shared.toOtherScreen()
+        case .sidesIn: SideMargin.move(-1)
+        case .sidesOut: SideMargin.move(1)
         }
     }
 }
@@ -5386,7 +5416,8 @@ final class KeysPopup: Popup {
             ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
                          ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
-                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", "")]),
+                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""),
+                         ("@sidesIn", ""), ("@sidesOut", "")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
             ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
                           ("⌥← / ⌥→", "previous / next wallpaper")]),
@@ -5600,6 +5631,10 @@ final class Desk: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(layout), name: .wallpapersListed, object: nil)
+        // the side columns moved (⌃⌥- / ⌃⌥=): the desk laid out again, the windows tiled again
+        NotificationCenter.default.addObserver(forName: SideMargin.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.layout()
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(languageChanged), name: Language.changed, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(tick), name: NSWorkspace.didWakeNotification, object: nil)
