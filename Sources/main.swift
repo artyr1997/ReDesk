@@ -1117,10 +1117,10 @@ enum DeskKey: String, CaseIterable {
         case .promote: "the window becomes the main one"
         case .pin: "pin the window to its place"
         case .otherScreen: "the window to the other screen"
-        case .sidesIn: "the side columns nearer the edges"
-        case .sidesOut: "the side columns further from the edges"
-        case .wordsIn: "the top and bottom words nearer the edges"
-        case .wordsOut: "the top and bottom words further from the edges"
+        case .sidesIn: "nearer the edges, across (the desk, or the app in front)"
+        case .sidesOut: "further from the edges, across"
+        case .wordsIn: "nearer the edges, down"
+        case .wordsOut: "further from the edges, down"
         }
     }
 
@@ -1168,6 +1168,17 @@ enum DeskKey: String, CaseIterable {
 
     var changed: Bool { shortcut != standard }
 
+    /// The distances' keys: with a Re app in front, its windows' (it is told, and sets its own); with the desk
+    /// in front, the desk's.
+    private func spacing(_ axis: String, _ way: Int, desk: () -> Void) {
+        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, tiledApps.contains(front) {
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.artursavytskyi.re.spacing"), object: "\(front) \(axis) \(way)", userInfo: nil, deliverImmediately: true)
+        } else {
+            desk()
+        }
+    }
+
     func run() {
         switch self {
         case .settings: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
@@ -1185,10 +1196,10 @@ enum DeskKey: String, CaseIterable {
         case .promote: Tiler.shared.promote()
         case .pin: Tiler.shared.togglePin()
         case .otherScreen: Tiler.shared.toOtherScreen()
-        case .sidesIn: SideMargin.across.move(-1)
-        case .sidesOut: SideMargin.across.move(1)
-        case .wordsIn: SideMargin.down.move(-1)
-        case .wordsOut: SideMargin.down.move(1)
+        case .sidesIn: spacing("x", -1) { SideMargin.across.move(-1) }
+        case .sidesOut: spacing("x", 1) { SideMargin.across.move(1) }
+        case .wordsIn: spacing("y", -1) { SideMargin.down.move(-1) }
+        case .wordsOut: spacing("y", 1) { SideMargin.down.move(1) }
         }
     }
 }
