@@ -5108,7 +5108,7 @@ final class KeysPopup: Popup {
                    ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
             ("Play", [("1 / 2 / 3", "folder / songs / radio"), ("Space", "play / pause"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("K", "keep a station"), ("M", "mini player")]),
             ("View", [("← →  Space", "turn the page"), ("M", "manga"), ("F", "full screen")]),
-            ("Table", [("Enter", "write in a cell"), ("⇧⌘ ← → ↑ ↓", "add a column / row"), ("⌘⌫ / ⇧⌘⌫", "delete the row / column"), ("⌃⇧↓ / ⌃⇧↑", "sort by the column")]),
+            ("Table", [("Enter", "write in a cell"), ("⇧⌘ ← → ↑ ↓", "add a column / row"), ("⌘⌫ / ⇧⌘⌫", "delete the row / column"), ("⌃⇧↓ / ⌃⇧↑", "sort by the column"), ("⌘Z / ⇧⌘Z", "undo / redo")]),
         ]),
         ("Re:Surf", [
             (nil, [("@ReSurf.newWindow", ""), ("@ReSurf.newTab", ""), ("@ReSurf.address", ""), ("@ReSurf.closeTab", ""), ("@ReSurf.nextTab", ""), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
