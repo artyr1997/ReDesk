@@ -18,9 +18,8 @@ import ImageIO
 import IOKit.hid
 import IOKit.ps
 import IOKit.pwr_mgt
-import LocalAuthentication
-import LocalAuthenticationEmbeddedUI
 import Network
+import OpenDirectory
 import ServiceManagement
 
 struct Corner {
@@ -3944,11 +3943,12 @@ enum YouTubeWallpaper {
 
 // ── the lock screen ──
 // ⌘L, or a few minutes with nothing touched: the desk's own screen over everything — the wallpaper
-// (a video one moving) — until Touch ID or the Mac's password
-// says it is you (LocalAuthentication: the password never reaches ReDesk). It is a window over a Mac
-// still unlocked, so after a while on it the Mac's own lock comes too; unlocking that lets this go.
+// (a video one moving) — until the Mac's password is typed into its own field (UNLOCK clicked, Return or
+// any letter opens it; tried against the account with OpenDirectory, no Touch ID, no system prompt). It is
+// a window over a Mac still unlocked, so after a while on it the Mac's own lock comes too; unlocking that
+// lets this go.
 
-/// The face: SPACE down the screen's middle, UNLOCK at the bottom. Over the wallpaper, in the apps' small letters.
+/// The face: UNLOCK down the screen's middle, the password's field there once asked for. Over the wallpaper, in the apps' small letters.
 let lockLetters = NSFont(name: "NotoSansJP-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .light)
 
 final class LockWindow: NSWindow {
@@ -3956,13 +3956,28 @@ final class LockWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-final class LockFace: NSView {
-    /// `asked`: UNLOCK clicked or Return pressed, which brings the system's prompt even while Touch ID waits
-    var unlock: (_ asked: Bool) -> Void = { _ in }
-    /// the screen with UNLOCK (the others only show the wallpaper)
+/// The password's field: no frame, the letters in the desk's ink, a + at each corner drawn by the face.
+/// Return tries it, Escape puts it away.
+final class PasswordField: NSSecureTextField {
+    var done: () -> Void = {}
+    var cancel: () -> Void = {}
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        // the caret in the same white ink as the dots
+        (currentEditor() as? NSTextView)?.insertionPointColor = ink(0.95)
+        return became
+    }
+}
+
+final class LockFace: NSView, NSTextFieldDelegate {
+    /// the password typed, to be tried: `answer` says whether it was right
+    var tryPassword: (_ password: String, _ answer: @escaping (Bool) -> Void) -> Void = { _, _ in }
+    /// a click on another screen than the main one
+    var elsewhere: () -> Void = {}
+    /// the screen with UNLOCK and the password (the others only show the wallpaper)
     let main: Bool
-    /// the system's prompt up: UNLOCK stands in the strong ink meanwhile
-    var asking = false { didSet { needsDisplay = true } }
+    private(set) var field: PasswordField?
+    private var trying = false
 
     init(frame: NSRect, main: Bool) {
         self.main = main
@@ -3975,13 +3990,22 @@ final class LockFace: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        guard main else { return unlock(false) }
-        unlock(unlockPlace.contains(convert(event.locationInWindow, from: nil)))
+        guard main else { return elsewhere() }
+        let point = convert(event.locationInWindow, from: nil)
+        if let field {
+            // a click beside the open field leaves it be (only Escape puts it away)
+            window?.makeFirstResponder(field)
+            return
+        }
+        if unlockPlace.contains(point) { openField(with: "") }
     }
-    override func rightMouseDown(with event: NSEvent) { unlock(false) }
     override func keyDown(with event: NSEvent) {
+        guard main, field == nil else { return }
+        if event.keyCode == UInt16(kVK_Escape) { return }
+        // Return opens the field; a letter opens it with that letter already in
         let enter = event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter)
-        unlock(enter)
+        let typed = event.characters?.filter { !$0.isNewline && $0.unicodeScalars.allSatisfy { $0.value >= 32 && $0.value != 127 } } ?? ""
+        if enter || !typed.isEmpty { openField(with: enter ? "" : typed) }
     }
 
     private var letters: [Character] { Array(tr("UNLOCK").filter { $0 != " " }) }
@@ -3992,14 +4016,100 @@ final class LockFace: NSView {
         return NSRect(x: bounds.midX - 40, y: bounds.midY - height / 2 - 16, width: 80, height: height + 32)
     }
 
+    /// the field's place, in the screen's middle where UNLOCK was
+    private var fieldPlace: NSRect {
+        NSRect(x: bounds.midX - 130, y: bounds.midY - 18, width: 260, height: 36)
+    }
+
+    func openField(with typed: String) {
+        guard field == nil else { return }
+        let field = PasswordField(frame: .zero)
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.textColor = ink(0.95)
+        field.font = NSFont(name: "NotoSansJP-Regular", size: 18) ?? .systemFont(ofSize: 18, weight: .light)
+        field.alignment = .center
+        field.stringValue = typed
+        field.delegate = self
+        field.cell?.isScrollable = true
+        field.cell?.usesSingleLineMode = true
+        let height = field.intrinsicContentSize.height
+        let place = fieldPlace
+        field.frame = NSRect(x: place.minX + 14, y: place.midY - height / 2, width: place.width - 28, height: height)
+        addSubview(field)
+        self.field = field
+        window?.makeFirstResponder(field)
+        // the caret after what was typed, not all of it chosen
+        if let editor = field.currentEditor() { editor.selectedRange = NSRange(location: (typed as NSString).length, length: 0) }
+        needsDisplay = true
+    }
+
+    func closeField() {
+        guard let field else { return }
+        field.removeFromSuperview()
+        self.field = nil
+        trying = false
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:)) { submit(); return true }
+        if selector == #selector(NSResponder.cancelOperation(_:)) { closeField(); return true }
+        return false
+    }
+
+    private func submit() {
+        guard let field, !trying else { return }
+        let password = field.stringValue
+        guard !password.isEmpty else { return }
+        trying = true
+        tryPassword(password) { [weak self] right in
+            guard let self, self.field === field else { return }
+            self.trying = false
+            if !right { self.wrong(field) }
+        }
+    }
+
+    /// a wrong password: the field shakes and empties
+    private func wrong(_ field: PasswordField) {
+        let start = field.frame.origin
+        let steps: [CGFloat] = [-12, 10, -8, 6, -3, 0]
+        for (i, dx) in steps.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.045 * Double(i)) {
+                field.setFrameOrigin(NSPoint(x: start.x + dx, y: start.y))
+                self.needsDisplay = true
+            }
+        }
+        field.stringValue = ""
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
+        if let field {
+            // a + at each corner of the field, as the popups and the apps' windows
+            let box = NSRect(x: field.frame.minX - 14, y: fieldPlace.minY, width: field.frame.width + 28, height: fieldPlace.height)
+            let path = NSBezierPath()
+            let a = PlusMarks.arm
+            for p in [NSPoint(x: box.minX, y: box.minY), NSPoint(x: box.maxX, y: box.minY),
+                      NSPoint(x: box.minX, y: box.maxY), NSPoint(x: box.maxX, y: box.maxY)] {
+                let x = p.x.rounded() + 0.25, y = p.y.rounded() - 0.25
+                path.move(to: NSPoint(x: x - a, y: y)); path.line(to: NSPoint(x: x + a, y: y))
+                path.move(to: NSPoint(x: x, y: y - a)); path.line(to: NSPoint(x: x, y: y + a))
+            }
+            path.lineWidth = PlusMarks.line
+            ink(0.6).setStroke()
+            path.stroke()
+            return
+        }
         drawWord()
     }
 
     /// UNLOCK down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
     private func drawWord() {
-        let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: asking ? strong : ink(0.5)]
+        let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: ink(0.5)]
         let bottom = bounds.midY - CGFloat(letters.count) * letterStep / 2
         for (i, letter) in letters.reversed().enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
@@ -4017,9 +4127,6 @@ final class LockScreen {
     private var shownAt: Date?
     private var before: NSRunningApplication?
     private var systemLocked = false
-    /// Touch ID being waited for without the system's prompt
-    private var touch: LAContext?
-    private var touchView: NSView?
 
     var shown: Bool { !windows.isEmpty }
 
@@ -4049,9 +4156,6 @@ final class LockScreen {
             guard let self, self.shown else { return }
             let before = self.before
             self.windows.forEach { $0.orderOut(nil) }
-            self.touch?.invalidate()
-            self.touch = nil
-            self.touchView = nil
             self.windows = []
             self.faces = []
             self.show()
@@ -4061,7 +4165,7 @@ final class LockScreen {
 
     private func check() {
         if shown {
-            if !systemLocked, !asking, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
+            if !systemLocked, !faces.contains(where: { $0.field != nil }), let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
                 lockTheMac()
             }
             return
@@ -4134,7 +4238,8 @@ final class LockScreen {
             container.addSubview(veil)
 
             let face = LockFace(frame: bounds, main: screen == mainScreen)
-            face.unlock = { [weak self] asked in self?.unlock(asked: asked) }
+            face.tryPassword = { [weak self] password, answer in self?.tryPassword(password, answer: answer) }
+            face.elsewhere = { [weak self] in self?.windows.first?.makeKeyAndOrderFront(nil) }
             container.addSubview(face)
             faces.append(face)
 
@@ -4152,7 +4257,6 @@ final class LockScreen {
             main.makeKeyAndOrderFront(nil)
             main.makeFirstResponder(main.contentView?.subviews.last)
         }
-        waitForTouch()
         NSCursor.setHiddenUntilMouseMoves(true)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Crossfade.themeDuration
@@ -4160,75 +4264,24 @@ final class LockScreen {
         }
     }
 
-    /// Touch ID without the system's prompt: an unseen LAAuthenticationView takes the prompt's place, so
-    /// a finger on the key is all it takes. Tried again after a miss; once Touch ID can't (locked after
-    /// misses, or none), a key or a click brings the system's prompt with the password.
-    private func waitForTouch() {
-        guard shown, let face = faces.first(where: { $0.main }) else { return }
-        let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else { return }
-        let view = LAAuthenticationView(context: context, controlSize: .small)
-        view.frame = NSRect(x: 0, y: 0, width: 16, height: 16)
-        view.alphaValue = 0
-        touchView?.removeFromSuperview()
-        face.addSubview(view)
-        touchView = view
-        touch = context
-        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "unlock the desk") { ok, error in
-            DispatchQueue.main.async {
-                guard self.shown, self.touch === context else { return }
-                if ok { return self.hide() }
-                let code = (error as? LAError)?.code
-                if code == .biometryLockout || code == .biometryNotAvailable || code == .biometryNotEnrolled {
-                    self.touch = nil
-                    return
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitForTouch() }
+    /// The password typed into the lock screen's own field, tried against this Mac's account (OpenDirectory,
+    /// as the Mac's own lock does), away from the main thread; no Touch ID, no system prompt.
+    private func tryPassword(_ password: String, answer: @escaping (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var right = false
+            if let node = try? ODNode(session: ODSession.default(), type: ODNodeType(kODNodeTypeAuthentication)),
+               let record = try? node.record(withRecordType: kODRecordTypeUsers, name: NSUserName(), attributes: nil) {
+                right = (try? record.verifyPassword(password)) != nil
             }
-        }
-    }
-
-    private var asking = false
-
-    /// UNLOCK clicked or Return: the system's prompt (Touch ID or the password; LocalAuthentication, the password
-    /// never reaches ReDesk), the screen stepping down under it meanwhile. Any other key or click: only once
-    /// Touch ID can't wait without it.
-    private func unlock(asked: Bool) {
-        guard shown, !asking, asked || touch == nil else { return }
-        // the unseen Touch ID gives way to the prompt, and comes back if the prompt is cancelled
-        touch?.invalidate()
-        touch = nil
-        let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            // nothing to ask with (no password on the Mac): it just opens
-            return hide()
-        }
-        asking = true
-        faces.forEach { $0.asking = true }
-        windows.forEach { $0.level = .floating }
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "unlock the desk") { ok, _ in
             DispatchQueue.main.async {
-                self.asking = false
-                self.faces.forEach { $0.asking = false }
-                if ok {
-                    self.hide()
-                } else {
-                    self.windows.forEach { $0.level = .screenSaver }
-                    NSApp.activate(ignoringOtherApps: true)
-                    self.windows.first?.makeKeyAndOrderFront(nil)
-                    self.waitForTouch()
-                }
+                answer(right)
+                if right { self.hide() }
             }
         }
     }
 
     func hide() {
         guard shown else { return }
-        touch?.invalidate()
-        touch = nil
-        touchView = nil
         NSApp.presentationOptions = []
         let going = windows
         windows = []
