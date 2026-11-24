@@ -5578,10 +5578,10 @@ final class KeysPopup: Popup {
         ]),
         ("Re:Term", [
             (nil, [("@ReTerm.newWindow", ""), ("⌘⇧T / C", "TERM / CHAT"), ("@ReTerm.wholeWindow", ""), ("@ReTerm.newConversation", ""),
-                   ("⇧↑ / ⇧↓", "the conversation above / below")]),
+                   ("⇧↑ / ⇧↓", "the conversation above / below"), ("⇧⌘⌫", "delete the conversation")]),
             ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
                       ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
-            ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before"), ("⇧⌘⌫", "delete the conversation")]),
+            ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),
         ]),
     ]
 
