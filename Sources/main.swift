@@ -5682,41 +5682,87 @@ final class KeysPopup: Popup {
         close()
     }
 
-    override func build() -> NSView {
-        var columns: [NSView] = []
-        for app in Self.apps {
-            var views: [NSView] = [heading(app.name), divider()]
-            for (name, list) in app.parts {
-                if let name { views.append(caption(name)) }
-                for (key, what) in list {
-                    let own = key.hasPrefix("@") ? Settable(String(key.dropFirst())) : nil
-                    let left: NSView = own.map(setter) ?? keys(key)
-                    let line = NSStackView(views: [left, NSView(), words(own?.title ?? what, size: 14)])
-                    line.orientation = .horizontal
-                    line.alignment = .firstBaseline
-                    line.spacing = 12
-                    views.append(line)
-                }
-            }
-            let column = column(views, spacing: 9)
-            for (i, view) in views.enumerated() where view is NSTextField && i > 0 { column.setCustomSpacing(9, after: views[i - 1]) }
-            column.setCustomSpacing(16, after: views[0])
-            column.setCustomSpacing(16, after: views[1])
-            columns.append(column)
+    /// a key and what it does: the key on the left (one's own: a click sets it), the words on the right
+    private func line(_ key: String, _ what: String) -> NSView {
+        let own = key.hasPrefix("@") ? Settable(String(key.dropFirst())) : nil
+        let left: NSView = own.map(setter) ?? keys(key)
+        let line = NSStackView(views: [left, NSView(), words(own?.title ?? what, size: 14)])
+        line.orientation = .horizontal
+        line.alignment = .firstBaseline
+        line.spacing = 12
+        return line
+    }
+
+    /// a group's name and its keys, one after another
+    private func entries(_ parts: [(String?, Keys)]) -> [NSView] {
+        var views: [NSView] = []
+        for (name, list) in parts {
+            if let name { views.append(caption(name)) }
+            for (key, what) in list { views.append(line(key, what)) }
         }
+        return views
+    }
+
+    /// a column: its heading and the line under it (if it has them), then its keys; a little room before each group
+    private func stack(_ views: [NSView], head: [NSView]) -> NSStackView {
+        let all = head + views
+        let column = column(all, spacing: 7)
+        for (i, view) in all.enumerated() where view is NSTextField && i > 0 && !head.contains(view) { column.setCustomSpacing(12, after: all[i - 1]) }
+        for view in head { column.setCustomSpacing(16, after: view) }
+        return column
+    }
+
+    private func row(_ columns: [NSView]) -> NSStackView {
         let row = NSStackView(views: columns)
         row.orientation = .horizontal
         row.alignment = .top
         row.distribution = .fillEqually
         row.spacing = 44
+        return row
+    }
+
+    /// Five columns across the top (ReFile's long list in two), and ReDesk across the bottom, its keys in five
+    /// columns too: so it all stands on one screen.
+    override func build() -> NSView {
+        var top: [NSView] = []
+        for app in Self.apps.dropFirst() {
+            if app.name == "Re:File" && app.parts.count > 2 {
+                top.append(stack(entries(Array(app.parts.prefix(2))), head: [heading(app.name), divider()]))
+                top.append(stack(entries(Array(app.parts.dropFirst(2))), head: [heading(" "), divider()]))
+            } else {
+                top.append(stack(entries(app.parts), head: [heading(app.name), divider()]))
+            }
+        }
+        let topRow = row(top)
+
+        // ReDesk: its heading and line across, its keys split into five columns as even as they go
+        let desk = Self.apps[0]
+        let deskViews = entries(desk.parts)
+        let per = Int((Double(deskViews.count) / 5).rounded(.up))
+        var deskColumns: [NSView] = []
+        for start in stride(from: 0, to: deskViews.count, by: per) {
+            deskColumns.append(stack(Array(deskViews[start..<min(start + per, deskViews.count)]), head: []))
+        }
+        while deskColumns.count < 5 { deskColumns.append(NSView()) }
+        let deskRow = row(deskColumns)
+        let deskHead = heading(desk.name)
+        let deskLine = divider()
+
         let footer = words("\(DeskKey.keys.shortcut.text) \(tr("or Esc closes"))  ·  \(DeskKey.settings.shortcut.text) \(tr("settings"))  ·  \(tr("click a key to set your own, ⌫ for its own again"))",
                            size: 13, alpha: 0.4)
-        let all = NSStackView(views: [row, footer])
+        let all = NSStackView(views: [topRow, deskHead, deskLine, deskRow, footer])
         all.orientation = .vertical
         all.alignment = .centerX
         all.spacing = 30
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalTo: all.widthAnchor).isActive = true
+        all.setCustomSpacing(36, after: topRow)
+        all.setCustomSpacing(16, after: deskHead)
+        all.setCustomSpacing(16, after: deskLine)
+        for view in [topRow, deskLine, deskRow] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.widthAnchor.constraint(equalTo: all.widthAnchor).isActive = true
+        }
+        deskHead.translatesAutoresizingMaskIntoConstraints = false
+        deskHead.leadingAnchor.constraint(equalTo: all.leadingAnchor).isActive = true
         return all
     }
 }
