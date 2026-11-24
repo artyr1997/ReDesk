@@ -744,72 +744,6 @@ enum WallpaperBlur {
     }
 }
 
-/// A dark shade along every edge of each screen, over the wallpaper (the video and the crossfade too) and
-/// under the desk's words, gauges and windows: the white ink at the edges stands out on any wallpaper, a
-/// light one too. Only to look at: clicks go through to the desktop.
-enum EdgeShade {
-    /// over the crossfade (the desktop's level + 2), under the desktop icons and the desk's pieces
-    static let level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 3)
-    /// how dark right at the edge
-    static let darkest: CGFloat = 0.55
-    private static var windows: [NSWindow] = []
-    private static var watching = false
-
-    /// One shade per screen, made again whenever the screens change.
-    static func start() {
-        refresh()
-        guard !watching else { return }
-        watching = true
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
-            refresh()
-        }
-    }
-
-    static func refresh() {
-        windows.forEach { $0.orderOut(nil) }
-        windows = NSScreen.screens.map { screen in
-            let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = false
-            window.ignoresMouseEvents = true
-            window.level = level
-            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
-            let view = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
-            view.wantsLayer = true
-            let size = screen.frame.size
-            // as deep as the side buttons and the words reach in, and a little past them
-            let across = size.width * 0.16, down = size.height * 0.18
-            // (start, end) of each gradient in the layer's unit square, and the band's frame
-            let bands: [(NSRect, CGPoint, CGPoint)] = [
-                (NSRect(x: 0, y: 0, width: across, height: size.height), CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)),
-                (NSRect(x: size.width - across, y: 0, width: across, height: size.height), CGPoint(x: 1, y: 0.5), CGPoint(x: 0, y: 0.5)),
-                (NSRect(x: 0, y: 0, width: size.width, height: down), CGPoint(x: 0.5, y: 0), CGPoint(x: 0.5, y: 1)),
-                (NSRect(x: 0, y: size.height - down, width: size.width, height: down), CGPoint(x: 0.5, y: 1), CGPoint(x: 0.5, y: 0)),
-            ]
-            for (frame, start, end) in bands {
-                let band = CAGradientLayer()
-                band.frame = frame
-                band.startPoint = start
-                band.endPoint = end
-                // eased, so it fades out with no line where it ends
-                let steps = 8
-                band.colors = (0...steps).map { i -> CGColor in
-                    let t = CGFloat(i) / CGFloat(steps)
-                    let fall = pow(1 - t, 2)
-                    return NSColor.black.withAlphaComponent(darkest * fall).cgColor
-                }
-                band.locations = (0...steps).map { NSNumber(value: Double($0) / Double(steps)) }
-                view.layer?.addSublayer(band)
-            }
-            window.contentView = view
-            window.setFrame(screen.frame, display: false)
-            window.orderFront(nil)
-            return window
-        }
-    }
-}
-
 /// A change of wallpaper is a crossfade: the old one, in windows over the new one, fades away
 /// once the new one is on the screen.
 enum Crossfade {
@@ -5818,7 +5752,6 @@ final class Desk: NSObject, NSApplicationDelegate {
         main.addItem(editItem)
         NSApp.mainMenu = main
 
-        EdgeShade.start()
         windows = Self.pieces(wallpapers: wallpapers)
         // the wave at the bottom, between TERM and NOTE; only to look at, clicks go through
         let waveWindow = DeskWindow(view: wave) { l in
