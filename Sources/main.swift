@@ -1095,7 +1095,7 @@ enum Settable: Equatable {
 
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
-    case settings, keys, lock, appearance, language, stillWallpaper, blurWallpaper
+    case settings, keys, dashboard, lock, appearance, language, stillWallpaper, blurWallpaper
     case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, sidesIn, sidesOut, wordsIn, wordsOut
 
     /// its line in the popup
@@ -1103,6 +1103,7 @@ enum DeskKey: String, CaseIterable {
         switch self {
         case .settings: "settings"
         case .keys: "these keys"
+        case .dashboard: "the dashboard: the Mac now"
         case .lock: "lock screen"
         case .appearance: "light / dark"
         case .language: "English / 日本語"
@@ -1129,6 +1130,7 @@ enum DeskKey: String, CaseIterable {
         switch self {
         case .settings: return Shortcut(key: kVK_ANSI_Comma, flags: cmd)
         case .keys: return Shortcut(key: kVK_ANSI_Slash, flags: cmd)
+        case .dashboard: return Shortcut(key: kVK_ANSI_D, flags: ctrlAlt)
         case .lock: return Shortcut(key: kVK_ANSI_L, flags: cmd)
         case .appearance: return Shortcut(key: kVK_ANSI_T, flags: cmdShift)
         case .language: return Shortcut(key: kVK_ANSI_J, flags: cmd)
@@ -1152,7 +1154,7 @@ enum DeskKey: String, CaseIterable {
 
     /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
     var anywhere: Bool {
-        [.appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen].contains(self)
+        [.dashboard, .appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen].contains(self)
     }
 
     var shortcut: Shortcut {
@@ -1183,8 +1185,9 @@ enum DeskKey: String, CaseIterable {
 
     func run() {
         switch self {
-        case .settings: KeysPopup.shared.close(); SettingsPopup.shared.toggle()
-        case .keys: SettingsPopup.shared.close(); KeysPopup.shared.toggle()
+        case .settings: KeysPopup.shared.close(); DashboardPopup.shared.close(); SettingsPopup.shared.toggle()
+        case .keys: SettingsPopup.shared.close(); DashboardPopup.shared.close(); KeysPopup.shared.toggle()
+        case .dashboard: SettingsPopup.shared.close(); KeysPopup.shared.close(); DashboardPopup.shared.toggle()
         case .lock: LockScreen.shared.show()
         case .appearance: Appearance.toggle()
         case .language: Language.toggle()
@@ -5544,7 +5547,7 @@ final class KeysPopup: Popup {
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
         ("Re:Desk", [
             // "@name": one of the desk's own keys (DeskKey), written as kept and set by a click
-            (nil, [("@settings", ""), ("@keys", ""), ("@lock", ""), ("@appearance", ""), ("@language", ""),
+            (nil, [("@settings", ""), ("@keys", ""), ("@dashboard", ""), ("@lock", ""), ("@appearance", ""), ("@language", ""),
                    ("@stillWallpaper", ""), ("@blurWallpaper", "")]),
             ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
@@ -6016,6 +6019,9 @@ if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < Co
     }
     render(SettingsPopup.shared, "settings\(suffix).png")
     render(KeysPopup.shared, "keys\(suffix).png")
+    // the dashboard with a few seconds of what it reads
+    DashboardPopup.shared.warmUp()
+    render(DashboardPopup.shared, "dashboard\(suffix).png")
     // the corner words, side by side, on the dark
     let columns = corners.map { corner -> NSView in
         let view = WordView(corner: corner)

@@ -3,10 +3,12 @@
 <plist version="1.0">
 <dict>
 	<!-- the hardened runtime's leave: the microphone (snap or clap, blowing on the Mac), the other apps'
-	     sound for the wave, and Apple Events -->
+	     sound for the wave, Apple Events, and Location (only for the Wi-Fi networks' names in the dashboard) -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.personal-information.location</key>
 	<true/>
 </dict>
 </plist>
