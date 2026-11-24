@@ -5581,7 +5581,7 @@ final class KeysPopup: Popup {
                    ("⇧↑ / ⇧↓", "the conversation above / below")]),
             ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
                       ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
-            ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),
+            ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before"), ("⇧⌘⌫", "delete the conversation")]),
         ]),
     ]
 
