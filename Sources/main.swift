@@ -3956,18 +3956,9 @@ final class LockWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-/// The password's field: no frame, the letters in the desk's ink, a + at each corner drawn by the face.
-/// Return tries it, Escape puts it away.
-final class PasswordField: NSSecureTextField {
-    var done: () -> Void = {}
-    var cancel: () -> Void = {}
-    override func becomeFirstResponder() -> Bool {
-        let became = super.becomeFirstResponder()
-        // the caret in the same white ink as the dots
-        (currentEditor() as? NSTextView)?.insertionPointColor = ink(0.95)
-        return became
-    }
-}
+/// The password's field: unseen (it only takes the typing, as a secure field: no other app reads it); the face
+/// draws a diamond for each letter, in a box marked by a + at each corner. Return tries it, Escape puts it away.
+final class PasswordField: NSSecureTextField {}
 
 final class LockFace: NSView, NSTextFieldDelegate {
     /// the password typed, to be tried: `answer` says whether it was right
@@ -3978,6 +3969,8 @@ final class LockFace: NSView, NSTextFieldDelegate {
     let main: Bool
     private(set) var field: PasswordField?
     private var trying = false
+    /// the box's sideways shift while it shakes for a wrong password
+    private var shake: CGFloat = 0
 
     init(frame: NSRect, main: Bool) {
         self.main = main
@@ -4016,10 +4009,13 @@ final class LockFace: NSView, NSTextFieldDelegate {
         return NSRect(x: bounds.midX - 40, y: bounds.midY - height / 2 - 16, width: 80, height: height + 32)
     }
 
-    /// the field's place, in the screen's middle where UNLOCK was
+    /// the password's box, in the screen's middle where UNLOCK was
     private var fieldPlace: NSRect {
-        NSRect(x: bounds.midX - 130, y: bounds.midY - 18, width: 260, height: 36)
+        NSRect(x: bounds.midX - 220 + shake, y: bounds.midY - 34, width: 440, height: 68)
     }
+
+    /// the diamonds' size and the step between them
+    private let dot: CGFloat = 12, dotStep: CGFloat = 22
 
     func openField(with typed: String) {
         guard field == nil else { return }
@@ -4028,21 +4024,19 @@ final class LockFace: NSView, NSTextFieldDelegate {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.textColor = ink(0.95)
-        field.font = NSFont(name: "NotoSansJP-Regular", size: 18) ?? .systemFont(ofSize: 18, weight: .light)
-        field.alignment = .center
+        field.alphaValue = 0
         field.stringValue = typed
         field.delegate = self
         field.cell?.isScrollable = true
         field.cell?.usesSingleLineMode = true
-        let height = field.intrinsicContentSize.height
-        let place = fieldPlace
-        field.frame = NSRect(x: place.minX + 14, y: place.midY - height / 2, width: place.width - 28, height: height)
+        field.frame = fieldPlace.insetBy(dx: 14, dy: 20)
         addSubview(field)
         self.field = field
         window?.makeFirstResponder(field)
-        // the caret after what was typed, not all of it chosen
-        if let editor = field.currentEditor() { editor.selectedRange = NSRange(location: (typed as NSString).length, length: 0) }
+        // typing goes on after what was typed, not over all of it chosen
+        DispatchQueue.main.async {
+            if let editor = field.currentEditor() { editor.selectedRange = NSRange(location: (field.stringValue as NSString).length, length: 0) }
+        }
         needsDisplay = true
     }
 
@@ -4054,6 +4048,8 @@ final class LockFace: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(self)
         needsDisplay = true
     }
+
+    func controlTextDidChange(_ obj: Notification) { needsDisplay = true }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.insertNewline(_:)) { submit(); return true }
@@ -4073,24 +4069,23 @@ final class LockFace: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// a wrong password: the field shakes and empties
+    /// a wrong password: the box shakes, then empties
     private func wrong(_ field: PasswordField) {
-        let start = field.frame.origin
-        let steps: [CGFloat] = [-12, 10, -8, 6, -3, 0]
+        let steps: [CGFloat] = [-14, 12, -9, 6, -3, 0]
         for (i, dx) in steps.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.045 * Double(i)) {
-                field.setFrameOrigin(NSPoint(x: start.x + dx, y: start.y))
+                self.shake = dx
                 self.needsDisplay = true
+                if i == steps.count - 1 { field.stringValue = "" }
             }
         }
-        field.stringValue = ""
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
         if let field {
-            // a + at each corner of the field, as the popups and the apps' windows
-            let box = NSRect(x: field.frame.minX - 14, y: fieldPlace.minY, width: field.frame.width + 28, height: fieldPlace.height)
+            // a + at each corner of the box, as the popups and the apps' windows
+            let box = fieldPlace
             let path = NSBezierPath()
             let a = PlusMarks.arm
             for p in [NSPoint(x: box.minX, y: box.minY), NSPoint(x: box.maxX, y: box.minY),
@@ -4102,6 +4097,20 @@ final class LockFace: NSView, NSTextFieldDelegate {
             path.lineWidth = PlusMarks.line
             ink(0.6).setStroke()
             path.stroke()
+            // a diamond for each letter typed, in the box's very middle (as many as fit)
+            let count = min((field.stringValue as NSString).length, Int((box.width - 40) / dotStep) + 1)
+            guard count > 0 else { return }
+            let first = box.midX - CGFloat(count - 1) * dotStep / 2
+            for i in 0..<count {
+                let c = NSPoint(x: first + CGFloat(i) * dotStep, y: box.midY)
+                let r = dot / 2
+                let diamond = NSBezierPath()
+                diamond.move(to: NSPoint(x: c.x, y: c.y + r)); diamond.line(to: NSPoint(x: c.x + r, y: c.y))
+                diamond.line(to: NSPoint(x: c.x, y: c.y - r)); diamond.line(to: NSPoint(x: c.x - r, y: c.y))
+                diamond.close()
+                ink(0.95).setFill()
+                diamond.fill()
+            }
             return
         }
         drawWord()
