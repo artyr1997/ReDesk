@@ -77,6 +77,10 @@ The pieces sit just above the desktop icons and below every window, in the apps'
 
 Then copy `build/ReDesk.app` to `/Applications/ReSpace` (next to the other Re apps) and open it.
 
+## The focus: the window or the desk
+
+⌃⌥F (anywhere; its own key can be set in the keys popup): a window has the focus (a Re app's diamond, its + strong): the desk takes it (ReDesk in front, no window chosen: the desk's own keys, F / S / T / N, are the keys now). The desk has it: the window that had it before has it again (closed since: the first of the windows).
+
 ## Dashboard
 
 ⌃⌥D (anywhere; its own key can be set in the keys popup): a popup in the desk's look (`Sources/Dashboard.swift`), the Mac as it is now, read every second while it is open and drawn in the desk's ink — spaced small captions, a large figure, the desk's thin bars, the last minute as a line ending in a diamond. PROCESSORS: how busy (host_processor_info), the cores, the load, how warm (the thermal state). MEMORY: used of all, as Activity Monitor counts it (the apps', wired, compressed), the pressure, swap. DISK: free of all, the bar of what is used. BATTERY: the level, charging (a diamond breathing at the bar's end), time to full or left, its health, cycles, watts and warmth (IOKit's AppleSmartBattery); on a Mac without one, on power. WI-FI: on / off, the network joined, its signal and rate, how fast down and up over the last minute, the networks near (looked for every 20 seconds, the strongest first, four small bars for the signal): a click joins one known or open, a network with a password not known asks for it in its row (Return joins, through networksetup, which keeps it in the keychain). The networks' names need Location (macOS keeps them from apps without it): ALLOW asks for it (the `com.apple.security.personal-information.location` entitlement, NSLocationUsageDescription). At the foot how long the Mac has been on, and the three processes working the processors hardest (ps). `ReDesk --render-popups <folder>` draws it too, after a few seconds' reading.

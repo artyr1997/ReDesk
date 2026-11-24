@@ -133,6 +133,7 @@ private let japaneseWords: [String: String] = [
 
     // ── the lock screen ──
     "UNLOCK": "解除",
+    "the focus: the window / the desk": "フォーカス：ウィンドウ / デスク",
     // the dashboard
     "System": "システム",
     "Processors": "処理装置",

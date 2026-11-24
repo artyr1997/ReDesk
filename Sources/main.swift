@@ -1096,7 +1096,7 @@ enum Settable: Equatable {
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
     case settings, keys, dashboard, lock, appearance, language, stillWallpaper, blurWallpaper
-    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, sidesIn, sidesOut, wordsIn, wordsOut
+    case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, focusDesk, sidesIn, sidesOut, wordsIn, wordsOut
 
     /// its line in the popup
     var title: String {
@@ -1117,6 +1117,7 @@ enum DeskKey: String, CaseIterable {
         case .promote: "the window becomes the main one"
         case .pin: "pin the window to its place"
         case .otherScreen: "the window to the other screen"
+        case .focusDesk: "the focus: the window / the desk"
         case .sidesIn: "nearer the edges, across (the desk, or the app in front)"
         case .sidesOut: "further from the edges, across"
         case .wordsIn: "nearer the edges, down"
@@ -1144,6 +1145,7 @@ enum DeskKey: String, CaseIterable {
         case .promote: return Shortcut(key: kVK_Return, flags: ctrlAlt)
         case .pin: return Shortcut(key: kVK_ANSI_P, flags: ctrlAlt)
         case .otherScreen: return Shortcut(key: kVK_ANSI_O, flags: ctrlAlt)
+        case .focusDesk: return Shortcut(key: kVK_ANSI_F, flags: ctrlAlt)
         // fn and an arrow (Home, End, Page Up, Page Down): ← → across, ↓ ↑ down
         case .sidesIn: return Shortcut(key: kVK_Home, flags: [])
         case .sidesOut: return Shortcut(key: kVK_End, flags: [])
@@ -1154,7 +1156,7 @@ enum DeskKey: String, CaseIterable {
 
     /// pressed with any app in front (a hot key); the others only with the desk or a Re app in front
     var anywhere: Bool {
-        [.dashboard, .appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen].contains(self)
+        [.dashboard, .appearance, .stillWallpaper, .blurWallpaper, .nextArrangement, .promote, .pin, .otherScreen, .focusDesk].contains(self)
     }
 
     var shortcut: Shortcut {
@@ -1201,6 +1203,7 @@ enum DeskKey: String, CaseIterable {
         case .promote: Tiler.shared.promote()
         case .pin: Tiler.shared.togglePin()
         case .otherScreen: Tiler.shared.toOtherScreen()
+        case .focusDesk: Tiler.shared.toggleFocus()
         case .sidesIn: spacing("x", -1) { SideMargin.across.move(-1) }
         case .sidesOut: spacing("x", 1) { SideMargin.across.move(1) }
         case .wordsIn: spacing("y", -1) { SideMargin.down.move(-1) }
@@ -2477,6 +2480,24 @@ final class Tiler {
             target = nil
         }
         return target
+    }
+
+    /// the window that had the focus when ⌃⌥F gave it to the desk: ⌃⌥F again gives it back
+    private var focusedBefore: TiledWindow?
+
+    /// ⌃⌥F: a window has the focus (its diamond, its + strong): the desk takes it, no window chosen; the desk
+    /// has it: the window that had it before has it again (gone: the first of them)
+    func toggleFocus() {
+        guard AXIsProcessTrusted() else { return Tiler.openAccessibilitySettings() }
+        refreshOthers()
+        let windows = (on && !order.isEmpty ? order : openWindows()) + others.keys.sorted().flatMap { others[$0] ?? [] }
+        let deskHasIt = NSWorkspace.shared.frontmostApplication == NSRunningApplication.current
+        if !deskHasIt, let current = focusedWindow() ?? focusedReWindow() {
+            focusedBefore = current
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        if let back = focusedBefore.flatMap({ windows.contains($0) ? $0 : nil }) ?? windows.first { raise(back) }
     }
 
     private func raise(_ window: TiledWindow) {
@@ -5628,7 +5649,7 @@ final class KeysPopup: Popup {
             ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
                          ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
-                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""),
+                         ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""), ("@focusDesk", ""),
                          ("@sidesIn", ""), ("@sidesOut", ""), ("@wordsIn", ""), ("@wordsOut", ""),
                          ("fn A ← → ↑ ↓", "the same in every app's windows")]),
             ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
