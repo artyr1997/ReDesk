@@ -5227,7 +5227,68 @@ class Popup: NSPanel {
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { close() }
     override func resignKey() { super.resignKey(); close() }
-    override func close() { super.close(); veil.orderOut(nil) }
+
+    // ── opening and closing as the apps' windows do (Opening.swift): the corners' + first, round the whole
+    // width but a quarter of the height, in the middle; the paper fills them and grows to the whole height;
+    // what it shows fades in over it. Closing: the same, backwards ──
+
+    private var stage: Timer?
+    private var stageBegun = Date()
+    private var closingNow = false
+    private static let opening = (plus: 0.10, fill: (0.06, 0.20), grow: (0.20, 0.44), show: (0.38, 0.56))
+    private static let closing = (hide: (0.0, 0.10), shrink: (0.08, 0.30), fill: (0.28, 0.42), plus: (0.40, 0.54))
+
+    private static func ease(_ t: Double) -> CGFloat {
+        let t = min(1, max(0, t))
+        return CGFloat(t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2)
+    }
+    private static func part(_ t: Double, _ span: (Double, Double)) -> Double { (t - span.0) / (span.1 - span.0) }
+
+    private func play(closing: Bool) {
+        stage?.invalidate()
+        stageBegun = Date()
+        closingNow = closing
+        stageStep()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.stageStep() }
+        RunLoop.main.add(timer, forMode: .common)
+        stage = timer
+    }
+
+    private func stageStep() {
+        let t = Date().timeIntervalSince(stageBegun)
+        let content = paperView.subviews
+        if !closingNow {
+            let o = Self.opening
+            paperView.stage(height: 0.25 + 0.75 * Self.ease(Self.part(t, o.grow)), fill: Self.ease(Self.part(t, o.fill)), plus: Self.ease(t / o.plus))
+            veil.alphaValue = Self.ease(Self.part(t, o.fill))
+            content.forEach { $0.alphaValue = Self.ease(Self.part(t, o.show)) }
+            if t >= o.show.1 { stage?.invalidate(); stage = nil }
+        } else {
+            let c = Self.closing
+            content.forEach { $0.alphaValue = 1 - Self.ease(Self.part(t, c.hide)) }
+            paperView.stage(height: 1 - 0.75 * Self.ease(Self.part(t, c.shrink)), fill: 1 - Self.ease(Self.part(t, c.fill)),
+                            plus: 1 - Self.ease(Self.part(t, c.plus)))
+            veil.alphaValue = 1 - Self.ease(Self.part(t, c.fill))
+            if t >= c.plus.1 { closed() }
+        }
+    }
+
+    /// closes as the apps' windows do; a second close meanwhile changes nothing
+    override func close() {
+        guard isVisible else { return veil.orderOut(nil) }
+        guard !closingNow else { return }
+        play(closing: true)
+    }
+
+    private func closed() {
+        stage?.invalidate()
+        stage = nil
+        closingNow = false
+        super.close()
+        veil.orderOut(nil)
+        veil.alphaValue = 1
+        paperView.stage(height: 1, fill: 1, plus: 1)
+    }
 
     /// the popup's content: built anew each time it shows (and when a choice changes what it shows)
     func build() -> NSView { NSView() }
@@ -5235,17 +5296,19 @@ class Popup: NSPanel {
     /// how wide it is on this screen
     func width(on screen: NSRect) -> CGFloat { frame.width }
 
-    func toggle() { isVisible ? close() : show() }
+    func toggle() { isVisible && !closingNow ? close() : show() }
 
     func show() {
         refresh()
         if let screen = NSScreen.main {
             veil.setFrame(screen.frame, display: true)
             veil.appearance = NSAppearance(named: .darkAqua)
+            veil.alphaValue = 0
             veil.orderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
         makeKeyAndOrderFront(nil)
+        play(closing: false)
     }
 
     func refresh() {
@@ -5398,10 +5461,23 @@ class Popup: NSPanel {
 final class PaperView: NSView {
     /// room round the paper for the corners' + (their arms reach out past it)
     static let margin: CGFloat = 8
+    /// opening or closing: how much of its height the paper has (in its middle), how filled, how strong the +
+    private var height: CGFloat = 1
+    private var fill: CGFloat = 1
+    private var plus: CGFloat = 1
+
+    func stage(height: CGFloat, fill: CGFloat, plus: CGFloat) {
+        self.height = height
+        self.fill = fill
+        self.plus = plus
+        needsDisplay = true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        let paper = bounds.insetBy(dx: Self.margin, dy: Self.margin)
-        Popup.paper.setFill()
+        let whole = bounds.insetBy(dx: Self.margin, dy: Self.margin)
+        let h = (whole.height * height).rounded()
+        let paper = NSRect(x: whole.minX, y: (whole.midY - h / 2).rounded(), width: whole.width, height: h)
+        Popup.paper.withAlphaComponent(Popup.paper.alphaComponent * fill).setFill()
         paper.fill()
         // no frame round it: a thin + at each of its corners, as ReDesk marks windows' corners
         let path = NSBezierPath()
@@ -5413,7 +5489,7 @@ final class PaperView: NSView {
             path.move(to: NSPoint(x: x, y: y - a)); path.line(to: NSPoint(x: x, y: y + a))
         }
         path.lineWidth = PlusMarks.line
-        Popup.line.setStroke()
+        Popup.line.withAlphaComponent(Popup.line.alphaComponent * plus).setStroke()
         path.stroke()
     }
 }
