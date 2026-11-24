@@ -3959,8 +3959,10 @@ final class LockWindow: NSWindow {
 final class LockFace: NSView {
     /// `asked`: UNLOCK clicked or Return pressed, which brings the system's prompt even while Touch ID waits
     var unlock: (_ asked: Bool) -> Void = { _ in }
-    /// the screen with SPACE and UNLOCK (the others only show the wallpaper)
+    /// the screen with UNLOCK (the others only show the wallpaper)
     let main: Bool
+    /// the system's prompt up: UNLOCK stands in the strong ink meanwhile
+    var asking = false { didSet { needsDisplay = true } }
 
     init(frame: NSRect, main: Bool) {
         self.main = main
@@ -3982,26 +3984,22 @@ final class LockFace: NSView {
         unlock(enter)
     }
 
-    /// UNLOCK at the bottom, with room round it for the click
+    private var letters: [Character] { Array(tr("UNLOCK").filter { $0 != " " }) }
+
+    /// UNLOCK down the screen's middle, with room round it for the click
     private var unlockPlace: NSRect {
-        NSRect(x: bounds.midX - 160, y: bounds.minY + bounds.height * 0.0625 - 16, width: 320, height: 52)
+        let height = CGFloat(letters.count) * letterStep
+        return NSRect(x: bounds.midX - 40, y: bounds.midY - height / 2 - 16, width: 80, height: height + 32)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
         drawWord()
-        let hint = NSAttributedString(string: tr("UNLOCK"), attributes: [
-            .font: lockLetters, .kern: 0.4 * 14, .foregroundColor: ink(0.5),
-        ])
-        let h = hint.size()
-        hint.draw(at: NSPoint(x: bounds.midX - h.width / 2, y: bounds.minY + bounds.height * 0.0625))
     }
 
-    /// SPACE down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
+    /// UNLOCK down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
     private func drawWord() {
-        let words = tr("SPACE")
-        let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: ink(0.5)]
-        let letters = words.filter { $0 != " " }
+        let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: asking ? strong : ink(0.5)]
         let bottom = bounds.midY - CGFloat(letters.count) * letterStep / 2
         for (i, letter) in letters.reversed().enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
@@ -4063,7 +4061,7 @@ final class LockScreen {
 
     private func check() {
         if shown {
-            if !systemLocked, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
+            if !systemLocked, !asking, let shownAt, Date().timeIntervalSince(shownAt) > systemLockMinutes * 60 {
                 lockTheMac()
             }
             return
@@ -4191,10 +4189,39 @@ final class LockScreen {
         }
     }
 
-    /// UNLOCK clicked or Return: the screen goes, no prompt asked. Any other key or click does nothing.
+    private var asking = false
+
+    /// UNLOCK clicked or Return: the system's prompt (Touch ID or the password; LocalAuthentication, the password
+    /// never reaches ReDesk), the screen stepping down under it meanwhile. Any other key or click: only once
+    /// Touch ID can't wait without it.
     private func unlock(asked: Bool) {
-        guard shown, asked else { return }
-        hide()
+        guard shown, !asking, asked || touch == nil else { return }
+        // the unseen Touch ID gives way to the prompt, and comes back if the prompt is cancelled
+        touch?.invalidate()
+        touch = nil
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            // nothing to ask with (no password on the Mac): it just opens
+            return hide()
+        }
+        asking = true
+        faces.forEach { $0.asking = true }
+        windows.forEach { $0.level = .floating }
+        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "unlock the desk") { ok, _ in
+            DispatchQueue.main.async {
+                self.asking = false
+                self.faces.forEach { $0.asking = false }
+                if ok {
+                    self.hide()
+                } else {
+                    self.windows.forEach { $0.level = .screenSaver }
+                    NSApp.activate(ignoringOtherApps: true)
+                    self.windows.first?.makeKeyAndOrderFront(nil)
+                    self.waitForTouch()
+                }
+            }
+        }
     }
 
     func hide() {

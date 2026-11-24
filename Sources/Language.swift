@@ -133,7 +133,6 @@ private let japaneseWords: [String: String] = [
 
     // ── the lock screen ──
     "UNLOCK": "解除",
-    "SPACE": "空",
 
     // ── keys ──
     "⌘/ or Esc closes  ·  ⌘, settings": "⌘/ か Esc で閉じる  ·  ⌘, 設定",
