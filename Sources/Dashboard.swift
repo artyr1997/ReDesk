@@ -202,6 +202,8 @@ final class WiFi: NSObject, CLLocationManagerDelegate {
     private let client = CWWiFiClient.shared()
     private var location: CLLocationManager?
     private(set) var near: [Near] = []
+    /// --render-popups: made-up networks, none of the ones really near (the pictures may be shown anywhere)
+    static var madeUp = false
     private(set) var scanning = false
     private var scannedAt = Date.distantPast
     /// what joining said ("joining…", a failure), shown a moment
@@ -210,11 +212,12 @@ final class WiFi: NSObject, CLLocationManagerDelegate {
 
     var interface: CWInterface? { client.interface() }
     var on: Bool { interface?.powerOn() ?? false }
-    var ssid: String? { interface?.ssid() }
-    var rssi: Int { interface?.rssiValue() ?? 0 }
-    var rate: Double { interface?.transmitRate() ?? 0 }
+    var ssid: String? { WiFi.madeUp ? "quiet garden" : interface?.ssid() }
+    var rssi: Int { WiFi.madeUp ? -48 : interface?.rssiValue() ?? 0 }
+    var rate: Double { WiFi.madeUp ? 866 : interface?.transmitRate() ?? 0 }
 
     var locationAllowed: Bool {
+        if WiFi.madeUp { return true }
         let status = CLLocationManager().authorizationStatus
         return status == .authorizedAlways || status == .authorized
     }
@@ -250,6 +253,12 @@ final class WiFi: NSObject, CLLocationManagerDelegate {
 
     /// the networks near, every 20 seconds at most
     func scan() {
+        if WiFi.madeUp {
+            near = [Near(ssid: "quiet garden", rssi: -48, open: false, known: true), Near(ssid: "tea house", rssi: -58, open: false, known: true),
+                    Near(ssid: "bamboo 5G", rssi: -66, open: false, known: false), Near(ssid: "library", rssi: -71, open: true, known: false),
+                    Near(ssid: "moss", rssi: -79, open: false, known: false)]
+            return
+        }
         guard !scanning, on, Date().timeIntervalSince(scannedAt) > 20, let interface else { return }
         scanning = true
         DispatchQueue.global(qos: .utility).async {
@@ -318,6 +327,7 @@ final class DashboardPopup: Popup {
 
     /// --render-popups: a few seconds read, as if it had been open
     func warmUp() {
+        WiFi.madeUp = true
         board.start()
         let until = Date().addingTimeInterval(3.5)
         while Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
@@ -395,7 +405,10 @@ final class DashboardView: NSView, NSTextFieldDelegate {
                 guard parts.count == 2, let cpu = Double(parts[0]) else { return nil }
                 return (String(parts[1]), cpu)
             }
-            DispatchQueue.main.async { self?.top = list.map { (name: $0.0, cpu: $0.1) } }
+            DispatchQueue.main.async {
+                // (made up for the pictures: what really runs here is no one else's to see)
+                self?.top = WiFi.madeUp ? [("ReSurf", 12), ("ReDesk", 4), ("ReTerm", 2)] : list.map { (name: $0.0, cpu: $0.1) }
+            }
         }
     }
 
@@ -408,7 +421,7 @@ final class DashboardView: NSView, NSTextFieldDelegate {
         hits = []
         let head = NSAttributedString(string: tr("System").uppercased(), attributes: [.font: Popup.noto(18), .foregroundColor: Popup.text, .kern: 7.2])
         head.draw(at: NSPoint(x: 0, y: 0))
-        let host = Host.current().localizedName ?? ""
+        let host = WiFi.madeUp ? "MacBook Pro" : Host.current().localizedName ?? ""
         let hostText = NSAttributedString(string: host, attributes: [.font: Popup.kurale(13), .foregroundColor: Popup.text.withAlphaComponent(0.5)])
         hostText.draw(at: NSPoint(x: bounds.width - hostText.size().width, y: 6))
 
