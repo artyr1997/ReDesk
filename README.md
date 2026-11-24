@@ -77,6 +77,10 @@ The pieces sit just above the desktop icons and below every window, in the apps'
 
 Then copy `build/ReDesk.app` to `/Applications/ReSpace` (next to the other Re apps) and open it.
 
+## Edge shade
+
+A dark shade along every edge of each screen (`EdgeShade`): a window per screen just over the wallpaper (the video and the crossfade too), under the desktop icons and the desk's words, gauges and windows, black at 55% right at the edge, easing out to nothing 16% of the screen in across and 18% down. So the white ink at the edges stands out on any wallpaper, a light one too. Only to look at: clicks go through.
+
 ## Lock screen
 
 ⌃⌘L, the right-click menu's Lock Screen, or 5 minutes with nothing touched (the `lockAfterMinutes` default; 0 turns that off; a playing video or anything else keeping the display awake holds it off): the desk's own screen over every other window, the Dock and the menu bar hidden and ⌘Tab, Force Quit and logging out held. The wallpaper (a video one moving, unless frozen with ⌘⇧M) under a light veil; UNLOCK down the middle, a letter to a step as the desk's words. A click on it, Return or any letter opens the password's own field in its place (no frame, a + at each corner, a diamond in white ink for each letter, in its very middle); Return tries the Mac's password against this account (OpenDirectory, as the Mac's own lock does), a wrong one shakes the box and empties it, Escape puts it away. No Touch ID, no system prompt. It is a window over a Mac still unlocked, so after 10 minutes on it the Mac's own lock comes too; unlocking that lets this screen go.
