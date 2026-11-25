@@ -1491,7 +1491,7 @@ typealias Shares = [String: [CGFloat]]
 /// Where the windows go; the first window is the main one.
 enum Arrangement: String, CaseIterable {
     // ⌘1…⌘6, in this order
-    case main, mainTop, centre, grid, full, fibonacci
+    case main, mainTop, centre, grid, single, fibonacci
 
     var title: String {
         switch self {
@@ -1499,7 +1499,7 @@ enum Arrangement: String, CaseIterable {
         case .mainTop: "Main on Top"
         case .centre: "Main in the Middle"
         case .grid: "Grid"
-        case .full: "Full Screen"
+        case .single: "One at a Time"
         case .fibonacci: "Fibonacci"
         }
     }
@@ -1507,8 +1507,8 @@ enum Arrangement: String, CaseIterable {
     /// the golden ratio: Fibonacci's cuts
     static let golden: CGFloat = (1 + 5.0.squareRoot()) / 2
 
-    /// Full Screen: all the windows in one place, the focused one on top
-    var stacks: Bool { self == .full }
+    /// One at a Time: each window fills the whole area (nearly all the screen with Almost Full), the focused one on top
+    var stacks: Bool { self == .single }
 
     func cut(count: Int) -> Cut {
         let all = (0 ..< count).map(Cut.window)
@@ -1548,7 +1548,7 @@ enum Arrangement: String, CaseIterable {
             let across = Int(Double(count).squareRoot().rounded(.up))
             let rows = stride(from: 0, to: count, by: across).map { even(Array(all[$0 ..< min($0 + across, count)]), across: true) }
             return even(rows, across: false)
-        case .full:
+        case .single:
             return .window(0)
         }
     }
@@ -1732,7 +1732,7 @@ final class Tiler {
     }
 
     /// whether the apps go across the top: Full Screen, or Almost Full
-    var showsApps: Bool { on && (arrangement == .full || almostFull) }
+    var showsApps: Bool { on && almostFull }
 
     /// the windows, main first; `slots[i]` is where `order[i]` belongs
     private var order: [TiledWindow] = []
@@ -1820,7 +1820,6 @@ final class Tiler {
         var visible = screen.visibleFrame
         visible.size.height -= appStripRoom(screen)
         let layout = Layout(area: visible)
-        if arrangement == .full { return layout.area }
         let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
                             width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
         return almostFull ? almost : Layout(area: screen.frame).tiles
@@ -2174,7 +2173,6 @@ final class Tiler {
     private func tilingArea() -> NSRect? {
         guard let screen = NSScreen.screens.first else { return nil }
         let layout = Layout(area: screen.visibleFrame)
-        if arrangement == .full { return layout.area }
         // Almost Full: right under the top (the menu bar, or the apps' strip where it hides), `tileGap` from the other edges
         let almost = NSRect(x: layout.area.minX + edgeGap, y: layout.area.minY + edgeGap,
                             width: layout.area.width - edgeGap * 2, height: layout.area.height - edgeGap)
