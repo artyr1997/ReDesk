@@ -4058,6 +4058,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
         self.field = field
         window?.makeFirstResponder(field)
         playBox(closing: false)
+        startBlinking()
         // typing goes on after what was typed, not over all of it chosen
         DispatchQueue.main.async {
             if let editor = field.currentEditor() { editor.selectedRange = NSRange(location: (field.stringValue as NSString).length, length: 0) }
@@ -4073,6 +4074,9 @@ final class LockFace: NSView, NSTextFieldDelegate {
     }
 
     private func removeField() {
+        blink?.invalidate()
+        blink = nil
+        glass.removeFromSuperview()
         field?.removeFromSuperview()
         field = nil
         trying = false
@@ -4082,6 +4086,21 @@ final class LockFace: NSView, NSTextFieldDelegate {
     // ── the box opening and closing as the apps' windows do (Opening.swift): UNLOCK fading, the corners' + round the
     // box's whole width but a quarter of its height, the box growing to its height, the diamonds coming in over it ──
 
+    /// the box's glass, as the apps' windows have (their dark HUD blur), as tall as the box has grown
+    private lazy var glass: NSVisualEffectView = {
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .withinWindow
+        v.state = .active
+        v.appearance = NSAppearance(named: .darkAqua)
+        v.alphaValue = 0
+        return v
+    }()
+    private var glassAlpha: CGFloat = 1
+    /// the caret after the diamonds, blinking as a text field's
+    private var caretOn = true
+    private var blink: Timer?
+
     private var boxStage: Timer?
     private var boxBegun = Date()
     private var boxClosing = false
@@ -4089,8 +4108,33 @@ final class LockFace: NSView, NSTextFieldDelegate {
     private var plusAlpha: CGFloat = 1
     private var boxGrow: CGFloat = 1
     private var dotsAlpha: CGFloat = 1
-    private static let boxOpening = (word: (0.0, 0.12), plus: (0.06, 0.16), grow: (0.16, 0.40), dots: (0.36, 0.50))
-    private static let boxClosingTimes = (dots: (0.0, 0.10), grow: (0.06, 0.26), plus: (0.24, 0.36), word: (0.30, 0.46))
+    private static let boxOpening = (word: (0.0, 0.12), plus: (0.06, 0.16), fill: (0.10, 0.22), grow: (0.16, 0.40), dots: (0.36, 0.50))
+    private static let boxClosingTimes = (dots: (0.0, 0.10), grow: (0.06, 0.26), fill: (0.20, 0.32), plus: (0.24, 0.36), word: (0.30, 0.46))
+
+    /// the box as it is now: a quarter of its height to the whole of it, shaking when the password was wrong
+    private var boxNow: NSRect {
+        let whole = fieldPlace
+        let h = whole.height * (0.25 + 0.75 * boxGrow)
+        return NSRect(x: whole.minX, y: whole.midY - h / 2, width: whole.width, height: h)
+    }
+
+    private func placeGlass() {
+        if glass.superview == nil, let field { addSubview(glass, positioned: .below, relativeTo: field) }
+        glass.frame = boxNow
+        glass.alphaValue = field == nil ? 0 : glassAlpha
+    }
+
+    private func startBlinking() {
+        blink?.invalidate()
+        caretOn = true
+        let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.caretOn.toggle()
+            self.needsDisplay = true
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        blink = timer
+    }
 
     private static func ease(_ t: Double) -> CGFloat {
         let t = min(1, max(0, t))
@@ -4114,6 +4158,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
             let o = Self.boxOpening
             wordAlpha = 1 - Self.part(t, o.word)
             plusAlpha = Self.part(t, o.plus)
+            glassAlpha = Self.part(t, o.fill)
             boxGrow = Self.part(t, o.grow)
             dotsAlpha = Self.part(t, o.dots)
             if t >= o.dots.1 { boxStage?.invalidate(); boxStage = nil }
@@ -4121,6 +4166,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
             let c = Self.boxClosingTimes
             dotsAlpha = 1 - Self.part(t, c.dots)
             boxGrow = 1 - Self.part(t, c.grow)
+            glassAlpha = 1 - Self.part(t, c.fill)
             plusAlpha = 1 - Self.part(t, c.plus)
             wordAlpha = Self.part(t, c.word)
             if t >= c.word.1 {
@@ -4128,13 +4174,18 @@ final class LockFace: NSView, NSTextFieldDelegate {
                 boxStage = nil
                 boxClosing = false
                 removeField()
-                (wordAlpha, plusAlpha, boxGrow, dotsAlpha) = (1, 1, 1, 1)
+                (wordAlpha, plusAlpha, boxGrow, dotsAlpha, glassAlpha) = (1, 1, 1, 1, 1)
             }
         }
+        if field != nil { placeGlass() }
         needsDisplay = true
     }
 
-    func controlTextDidChange(_ obj: Notification) { needsDisplay = true }
+    func controlTextDidChange(_ obj: Notification) {
+        // typing: the caret steady a moment, as a text field's
+        startBlinking()
+        needsDisplay = true
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.insertNewline(_:)) { submit(); return true }
@@ -4160,6 +4211,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
         for (i, dx) in steps.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.045 * Double(i)) {
                 self.shake = dx
+                self.placeGlass()
                 self.needsDisplay = true
                 if i == steps.count - 1 { field.stringValue = "" }
             }
@@ -4172,9 +4224,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
             if wordAlpha > 0 { drawWord(alpha: wordAlpha) }
             // a + at each corner of the box, as the popups and the apps' windows; a quarter of its height to the
             // whole of it while it opens
-            let whole = fieldPlace
-            let h = whole.height * (0.25 + 0.75 * boxGrow)
-            let box = NSRect(x: whole.minX, y: whole.midY - h / 2, width: whole.width, height: h)
+            let box = boxNow
             let path = NSBezierPath()
             let a = PlusMarks.arm
             for p in [NSPoint(x: box.minX, y: box.minY), NSPoint(x: box.maxX, y: box.minY),
@@ -4188,8 +4238,14 @@ final class LockFace: NSView, NSTextFieldDelegate {
             path.stroke()
             // a diamond for each letter typed, in the box's very middle (as many as fit)
             let count = min((field.stringValue as NSString).length, Int((box.width - 40) / dotStep) + 1)
+            let first = box.midX - CGFloat(max(count, 1) - 1) * dotStep / 2
+            // the caret: after the last diamond (in the middle, nothing typed yet), blinking
+            if caretOn && !boxClosing && dotsAlpha > 0 {
+                let x = count > 0 ? first + CGFloat(count - 1) * dotStep + dot / 2 + 8 : box.midX
+                ink(0.85 * dotsAlpha).setFill()
+                NSRect(x: x.rounded(), y: box.midY - 11, width: 1.5, height: 22).fill()
+            }
             guard count > 0 else { return }
-            let first = box.midX - CGFloat(count - 1) * dotStep / 2
             for i in 0..<count {
                 let c = NSPoint(x: first + CGFloat(i) * dotStep, y: box.midY)
                 let r = dot / 2
