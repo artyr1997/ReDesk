@@ -3984,6 +3984,14 @@ final class LockWindow: NSWindow {
 /// draws a diamond for each letter, in a box marked by a + at each corner. Return tries it, Escape puts it away.
 final class PasswordField: NSSecureTextField {}
 
+/// Over the password box's glass: its +, its diamonds and its caret (the face draws under its subviews, the
+/// glass among them, so these are drawn here, above it). Clicks go through to the face.
+final class LockBoxMarks: NSView {
+    weak var face: LockFace?
+    override func draw(_ dirtyRect: NSRect) { face?.drawBox() }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 final class LockFace: NSView, NSTextFieldDelegate {
     /// the password typed, to be tried: `answer` says whether it was right
     var tryPassword: (_ password: String, _ answer: @escaping (Bool) -> Void) -> Void = { _, _ in }
@@ -4077,6 +4085,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
         blink?.invalidate()
         blink = nil
         glass.removeFromSuperview()
+        marks.removeFromSuperview()
         field?.removeFromSuperview()
         field = nil
         trying = false
@@ -4118,10 +4127,19 @@ final class LockFace: NSView, NSTextFieldDelegate {
         return NSRect(x: whole.minX, y: whole.midY - h / 2, width: whole.width, height: h)
     }
 
+    private lazy var marks: LockBoxMarks = {
+        let v = LockBoxMarks()
+        v.face = self
+        return v
+    }()
+
     private func placeGlass() {
         if glass.superview == nil, let field { addSubview(glass, positioned: .below, relativeTo: field) }
+        if marks.superview == nil { addSubview(marks, positioned: .above, relativeTo: glass) }
         glass.frame = boxNow
         glass.alphaValue = field == nil ? 0 : glassAlpha
+        marks.frame = bounds
+        marks.needsDisplay = true
     }
 
     private func startBlinking() {
@@ -4220,8 +4238,17 @@ final class LockFace: NSView, NSTextFieldDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
-        if let field {
+        if field != nil {
             if wordAlpha > 0 { drawWord(alpha: wordAlpha) }
+            return
+        }
+        drawWord()
+    }
+
+    /// the box's +, diamonds and caret, drawn over its glass (LockBoxMarks)
+    func drawBox() {
+        guard main, let field else { return }
+        do {
             // a + at each corner of the box, as the popups and the apps' windows; a quarter of its height to the
             // whole of it while it opens
             let box = boxNow
@@ -4256,9 +4283,12 @@ final class LockFace: NSView, NSTextFieldDelegate {
                 ink(0.95 * dotsAlpha).setFill()
                 diamond.fill()
             }
-            return
         }
-        drawWord()
+    }
+
+    /// whatever the face redraws (a blink, a letter typed, the box moving), the box's marks over the glass too
+    override var needsDisplay: Bool {
+        didSet { if needsDisplay, marks.superview != nil { marks.needsDisplay = true } }
     }
 
     /// UNLOCK down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
