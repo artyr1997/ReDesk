@@ -2340,9 +2340,24 @@ final class Tiler {
                 setFrame(of: move.window.element, to: move.to, exact: true)
                 self.settled[move.window] = frame(of: move.window.element) ?? move.to
             }
-            // again where they now are: an app takes the word only for the place its window is in
-            WindowJoins.tell(moves.map { ($0.window.element, $0.to) }, separate: !self.flush || self.arrangement.stacks,
-                             pinned: self.pinned.keys.map(\.element), shared: self.sharedGlass)
+            // again where they now are: an app takes the word only for the place its window is in. Each screen told
+            // on its own, all its windows (who touches whom), with its own glass: the main screen's shared glass is
+            // not the other screens' (with fewer than two windows on the main one, theirs was taken for none)
+            let separate = !self.flush || self.arrangement.stacks
+            let pins = self.pinned.keys.map(\.element)
+            guard self.on else {
+                return WindowJoins.tell(moves.map { ($0.window.element, $0.to) }, separate: separate, pinned: pins, shared: false)
+            }
+            if self.slots.count == self.order.count, !self.order.isEmpty {
+                WindowJoins.tell(zip(self.order, self.slots).map { ($0.element, $1) }, separate: separate, pinned: pins, shared: self.sharedGlass)
+            }
+            let elsewhere = self.otherPlaces()
+            for list in self.others.values {
+                let placed = elsewhere.filter { list.contains($0.0) }
+                guard !placed.isEmpty else { continue }
+                let joined = self.flush && !self.arrangement.stacks && placed.count > 1
+                WindowJoins.tell(placed.map { ($0.0.element, $0.1) }, separate: separate, pinned: pins, shared: joined)
+            }
         }
         let still = moves.allSatisfy { $0.from.integral == $0.to }
         guard !still, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return finish() }
