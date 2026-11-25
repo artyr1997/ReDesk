@@ -309,10 +309,10 @@ final class WiFi: NSObject, CLLocationManagerDelegate {
 }
 
 final class DashboardPopup: Popup {
-    static let shared = DashboardPopup(width: 1000)
+    static let shared = DashboardPopup(width: 1400)
     private let board = DashboardView()
 
-    override func width(on screen: NSRect) -> CGFloat { min(1000, screen.width - 80) }
+    override func width(on screen: NSRect) -> CGFloat { min(1400, screen.width - 160) }
     override func build() -> NSView { board }
 
     override func show() {
@@ -348,7 +348,7 @@ final class DashboardView: NSView, NSTextFieldDelegate {
     private var password: NSSecureTextField?
     private var asking: String?
 
-    static let height: CGFloat = 560
+    static let height: CGFloat = 600
 
     override var isFlipped: Bool { true }
 
@@ -414,7 +414,7 @@ final class DashboardView: NSView, NSTextFieldDelegate {
 
     // ── drawn ──
 
-    private let gap: CGFloat = 44
+    private let gap: CGFloat = 64
     private var colW: CGFloat { (bounds.width - gap * 2) / 3 }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -425,7 +425,7 @@ final class DashboardView: NSView, NSTextFieldDelegate {
         let hostText = NSAttributedString(string: host, attributes: [.font: Popup.kurale(13), .foregroundColor: Popup.text.withAlphaComponent(0.5)])
         hostText.draw(at: NSPoint(x: bounds.width - hostText.size().width, y: 6))
 
-        let y0: CGFloat = 64, cardH: CGFloat = 200, y1 = y0 + cardH + 40
+        let y0: CGFloat = 64, cardH: CGFloat = 216, y1 = y0 + cardH + 40
         let x = [0, colW + gap, (colW + gap) * 2]
         drawCPU(NSRect(x: x[0], y: y0, width: colW, height: cardH))
         drawMemory(NSRect(x: x[0], y: y1, width: colW, height: cardH))
