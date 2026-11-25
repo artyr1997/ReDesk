@@ -5,7 +5,7 @@
 // Tiling (optional): the Re apps' windows share the middle of the desk, between the gauges.
 // Knocks: two to five knocks on the MacBook, each an action.
 // Keys: on the desk and in the Re apps ⌘ arrows move the focus between windows, ⌥← / ⌥→ step the
-// wallpapers, ⌥↑ / ⌥↓ the desktops, ⌘1…⌘8 pick an arrangement (CommandKeys); ⌘⇧T switches the Mac
+// wallpapers, ⌥↑ / ⌥↓ the desktops, ⌘1…⌘6 pick an arrangement (CommandKeys); ⌘⇧T switches the Mac
 // between light and dark (anywhere: HotKeys).
 // Each piece is a small borderless window just above the desktop icons;
 // a right click on any of them can open ReDesk at login or quit it.
@@ -1214,7 +1214,7 @@ enum DeskKey: String, CaseIterable {
 
 /// The desk's ⌘ keys, only while the desk or one of the Re apps is in front (elsewhere they keep their usual
 /// meaning): ⌘, settings, ⌘/ the keys, ⌘L lock screen, ⌘J English / 日本語, ⌘= plus marks, ⌘- flush,
-/// ⌘0 almost full, ⌘. tiling, ⌘1…⌘8 an arrangement; ⌘ arrows the focus to the nearest window, ⌘⌥ arrows
+/// ⌘0 almost full, ⌘. tiling, ⌘1…⌘6 an arrangement; ⌘ arrows the focus to the nearest window, ⌘⌥ arrows
 /// trade places with it, ⌘fn arrows resize it; ⌥↑ / ⌥↓ the desktop above / below, ⌘⌃↑ / ⌘⌃↓ the window
 /// in front taken there; ⌥← / ⌥→ the previous / next wallpaper. While something is being typed, ⌘ and ⌥
 /// arrows stay the text's (but in ReTerm and ReNote). Taking a key away from an app needs an event tap, which needs the Accessibility
@@ -1365,7 +1365,7 @@ enum CommandKeys {
         } else if flags == [.maskCommand, .maskControl], key == kVK_UpArrow || key == kVK_DownArrow {
             act = { Desktops.shared.take(key == kVK_UpArrow ? -1 : 1) }
         } else if flags == .maskCommand {
-            // ⌘1…⌘8: an arrangement (in the order of the right-click menu), tiling on
+            // ⌘1…⌘6: an arrangement (in the order of the right-click menu), tiling on
             if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
                 act = { Tiler.shared.choose(Arrangement.allCases[number]) }
             } else {
@@ -1490,23 +1490,25 @@ typealias Shares = [String: [CGFloat]]
 
 /// Where the windows go; the first window is the main one.
 enum Arrangement: String, CaseIterable {
-    case main, mainTop, centre, columns, rows, grid, single, full
+    // ⌘1…⌘6, in this order
+    case main, mainTop, centre, grid, full, fibonacci
 
     var title: String {
         switch self {
         case .main: "Main and Stack"
         case .mainTop: "Main on Top"
         case .centre: "Main in the Middle"
-        case .columns: "Columns"
-        case .rows: "Rows"
         case .grid: "Grid"
-        case .single: "One at a Time"
         case .full: "Full Screen"
+        case .fibonacci: "Fibonacci"
         }
     }
 
-    /// One at a Time and Full Screen: all the windows in one place, the focused one on top
-    var stacks: Bool { self == .single || self == .full }
+    /// the golden ratio: Fibonacci's cuts
+    static let golden: CGFloat = (1 + 5.0.squareRoot()) / 2
+
+    /// Full Screen: all the windows in one place, the focused one on top
+    var stacks: Bool { self == .full }
 
     func cut(count: Int) -> Cut {
         let all = (0 ..< count).map(Cut.window)
@@ -1529,16 +1531,24 @@ enum Arrangement: String, CaseIterable {
             let left = rest.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
             let right = rest.enumerated().filter { $0.offset % 2 == 1 }.map(\.element)
             return .parts(across: true, [even(left, across: false), all[0], even(right, across: false)], shares: [1, 2, 1])
-        case .columns:
-            return even(all, across: true)
-        case .rows:
-            return even(all, across: false)
+        case .fibonacci:
+            // the golden spiral: the first window the larger part of the golden cut (61.8%), the rest cut again the
+            // other way, and so on, turning round (left, top, right, bottom…): each window the next square of it
+            func spiral(_ from: Int, _ turn: Int) -> Cut {
+                if from == count - 1 { return all[from] }
+                let across = turn % 2 == 0
+                let first = turn % 4 < 2
+                let rest = spiral(from + 1, turn + 1)
+                return .parts(across: across, first ? [all[from], rest] : [rest, all[from]],
+                              shares: first ? [Double(Self.golden), 1] : [1, Double(Self.golden)])
+            }
+            return spiral(0, 0)
         case .grid:
             // as square as it gets; a short last row is spread across the width
             let across = Int(Double(count).squareRoot().rounded(.up))
             let rows = stride(from: 0, to: count, by: across).map { even(Array(all[$0 ..< min($0 + across, count)]), across: true) }
             return even(rows, across: false)
-        case .single, .full:
+        case .full:
             return .window(0)
         }
     }
@@ -2533,7 +2543,7 @@ final class Tiler {
         animate([Move(window: window, from: from, to: to)])
     }
 
-    /// ⌘1…⌘8 (in the Re apps): this arrangement, with tiling on.
+    /// ⌘1…⌘6 (in the Re apps): this arrangement, with tiling on.
     /// Choosing the arrangement already in use evens out what resizing changed.
     func choose(_ arrangement: Arrangement) {
         if on && arrangement == self.arrangement { shares[sharesKey] = nil }
@@ -5722,7 +5732,7 @@ final class SettingsPopup: Popup {
         }
         let arrangements = Arrangement.allCases
         desk.append(choiceRow("Arrangement", arrangements.map(\.title), arrangements.firstIndex(of: Tiler.shared.arrangement) ?? 0,
-                              indent: 18, note: "⌘1…⌘8") { Tiler.shared.choose(arrangements[$0]) })
+                              indent: 18, note: "⌘1…⌘6") { Tiler.shared.choose(arrangements[$0]) })
         desk.append(toggleRow("Almost full", Tiler.shared.almostFull, indent: 18, note: "⌘0") { Tiler.shared.almostFull = $0 })
         desk.append(toggleRow("Flush", Tiler.shared.flush, indent: 18, note: "⌘-") { Tiler.shared.flush = $0 })
         desk += [
@@ -5818,7 +5828,7 @@ final class KeysPopup: Popup {
                    ("@stillWallpaper", ""), ("@blurWallpaper", "")]),
             ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
                          ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
-                         ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘8", "an arrangement"),
+                         ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘6", "an arrangement"),
                          ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""), ("@focusDesk", ""),
                          ("@sidesIn", ""), ("@sidesOut", ""), ("@wordsIn", ""), ("@wordsOut", ""),
                          ("fn A ← → ↑ ↓", "the same in every app's windows")]),
