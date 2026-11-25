@@ -4009,7 +4009,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
     override func mouseDown(with event: NSEvent) {
         guard main else { return elsewhere() }
         let point = convert(event.locationInWindow, from: nil)
-        if let field {
+        if let field, !boxClosing {
             // a click beside the open field leaves it be (only Escape puts it away)
             window?.makeFirstResponder(field)
             return
@@ -4057,6 +4057,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
         addSubview(field)
         self.field = field
         window?.makeFirstResponder(field)
+        playBox(closing: false)
         // typing goes on after what was typed, not over all of it chosen
         DispatchQueue.main.async {
             if let editor = field.currentEditor() { editor.selectedRange = NSRange(location: (field.stringValue as NSString).length, length: 0) }
@@ -4064,12 +4065,72 @@ final class LockFace: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    /// Escape: the box closes as it opened, backwards; then UNLOCK again
     func closeField() {
-        guard let field else { return }
-        field.removeFromSuperview()
-        self.field = nil
-        trying = false
+        guard field != nil, !boxClosing else { return }
         window?.makeFirstResponder(self)
+        playBox(closing: true)
+    }
+
+    private func removeField() {
+        field?.removeFromSuperview()
+        field = nil
+        trying = false
+        needsDisplay = true
+    }
+
+    // ── the box opening and closing as the apps' windows do (Opening.swift): UNLOCK fading, the corners' + round the
+    // box's whole width but a quarter of its height, the box growing to its height, the diamonds coming in over it ──
+
+    private var boxStage: Timer?
+    private var boxBegun = Date()
+    private var boxClosing = false
+    private var wordAlpha: CGFloat = 1
+    private var plusAlpha: CGFloat = 1
+    private var boxGrow: CGFloat = 1
+    private var dotsAlpha: CGFloat = 1
+    private static let boxOpening = (word: (0.0, 0.12), plus: (0.06, 0.16), grow: (0.16, 0.40), dots: (0.36, 0.50))
+    private static let boxClosingTimes = (dots: (0.0, 0.10), grow: (0.06, 0.26), plus: (0.24, 0.36), word: (0.30, 0.46))
+
+    private static func ease(_ t: Double) -> CGFloat {
+        let t = min(1, max(0, t))
+        return CGFloat(t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2)
+    }
+    private static func part(_ t: Double, _ span: (Double, Double)) -> CGFloat { ease((t - span.0) / (span.1 - span.0)) }
+
+    private func playBox(closing: Bool) {
+        boxStage?.invalidate()
+        boxBegun = Date()
+        boxClosing = closing
+        stepBox()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.stepBox() }
+        RunLoop.main.add(timer, forMode: .common)
+        boxStage = timer
+    }
+
+    private func stepBox() {
+        let t = Date().timeIntervalSince(boxBegun)
+        if !boxClosing {
+            let o = Self.boxOpening
+            wordAlpha = 1 - Self.part(t, o.word)
+            plusAlpha = Self.part(t, o.plus)
+            boxGrow = Self.part(t, o.grow)
+            dotsAlpha = Self.part(t, o.dots)
+            if t >= o.dots.1 { boxStage?.invalidate(); boxStage = nil }
+        } else {
+            let c = Self.boxClosingTimes
+            dotsAlpha = 1 - Self.part(t, c.dots)
+            boxGrow = 1 - Self.part(t, c.grow)
+            plusAlpha = 1 - Self.part(t, c.plus)
+            wordAlpha = Self.part(t, c.word)
+            if t >= c.word.1 {
+                boxStage?.invalidate()
+                boxStage = nil
+                boxClosing = false
+                removeField()
+                (wordAlpha, plusAlpha, boxGrow, dotsAlpha) = (1, 1, 1, 1)
+            }
+        }
         needsDisplay = true
     }
 
@@ -4108,8 +4169,12 @@ final class LockFace: NSView, NSTextFieldDelegate {
     override func draw(_ dirtyRect: NSRect) {
         guard main else { return }
         if let field {
-            // a + at each corner of the box, as the popups and the apps' windows
-            let box = fieldPlace
+            if wordAlpha > 0 { drawWord(alpha: wordAlpha) }
+            // a + at each corner of the box, as the popups and the apps' windows; a quarter of its height to the
+            // whole of it while it opens
+            let whole = fieldPlace
+            let h = whole.height * (0.25 + 0.75 * boxGrow)
+            let box = NSRect(x: whole.minX, y: whole.midY - h / 2, width: whole.width, height: h)
             let path = NSBezierPath()
             let a = PlusMarks.arm
             for p in [NSPoint(x: box.minX, y: box.minY), NSPoint(x: box.maxX, y: box.minY),
@@ -4119,7 +4184,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
                 path.move(to: NSPoint(x: x, y: y - a)); path.line(to: NSPoint(x: x, y: y + a))
             }
             path.lineWidth = PlusMarks.line
-            ink(0.6).setStroke()
+            ink(0.6 * plusAlpha).setStroke()
             path.stroke()
             // a diamond for each letter typed, in the box's very middle (as many as fit)
             let count = min((field.stringValue as NSString).length, Int((box.width - 40) / dotStep) + 1)
@@ -4132,7 +4197,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
                 diamond.move(to: NSPoint(x: c.x, y: c.y + r)); diamond.line(to: NSPoint(x: c.x + r, y: c.y))
                 diamond.line(to: NSPoint(x: c.x, y: c.y - r)); diamond.line(to: NSPoint(x: c.x - r, y: c.y))
                 diamond.close()
-                ink(0.95).setFill()
+                ink(0.95 * dotsAlpha).setFill()
                 diamond.fill()
             }
             return
@@ -4141,8 +4206,8 @@ final class LockFace: NSView, NSTextFieldDelegate {
     }
 
     /// UNLOCK down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
-    private func drawWord() {
-        let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: ink(0.5)]
+    private func drawWord(alpha: CGFloat = 1) {
+        let attributes: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: ink(0.5 * alpha)]
         let bottom = bounds.midY - CGFloat(letters.count) * letterStep / 2
         for (i, letter) in letters.reversed().enumerated() {
             let text = NSAttributedString(string: String(letter), attributes: attributes)
