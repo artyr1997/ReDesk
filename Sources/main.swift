@@ -3982,7 +3982,10 @@ final class LockWindow: NSWindow {
 
 /// The password's field: unseen (it only takes the typing, as a secure field: no other app reads it); the face
 /// draws a diamond for each letter, in a box marked by a + at each corner. Return tries it, Escape puts it away.
-final class PasswordField: NSSecureTextField {}
+final class PasswordField: NSSecureTextField {
+    /// what is typed now: a secure field gives its text back only once editing ends, its editor has it meanwhile
+    var typed: String { (currentEditor() as? NSText)?.string ?? stringValue }
+}
 
 /// Over the password box's glass: its +, its diamonds and its caret (the face draws under its subviews, the
 /// glass among them, so these are drawn here, above it). Clicks go through to the face.
@@ -4148,7 +4151,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
         let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.caretOn.toggle()
-            self.needsDisplay = true
+            self.redraw()
         }
         RunLoop.main.add(timer, forMode: .common)
         blink = timer
@@ -4202,7 +4205,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         // typing: the caret steady a moment, as a text field's
         startBlinking()
-        needsDisplay = true
+        redraw()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -4213,7 +4216,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
 
     private func submit() {
         guard let field, !trying else { return }
-        let password = field.stringValue
+        let password = field.typed
         guard !password.isEmpty else { return }
         trying = true
         tryPassword(password) { [weak self] right in
@@ -4230,7 +4233,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.045 * Double(i)) {
                 self.shake = dx
                 self.placeGlass()
-                self.needsDisplay = true
+                self.redraw()
                 if i == steps.count - 1 { field.stringValue = "" }
             }
         }
@@ -4264,7 +4267,7 @@ final class LockFace: NSView, NSTextFieldDelegate {
             ink(0.6 * plusAlpha).setStroke()
             path.stroke()
             // a diamond for each letter typed, in the box's very middle (as many as fit)
-            let count = min((field.stringValue as NSString).length, Int((box.width - 40) / dotStep) + 1)
+            let count = min((field.typed as NSString).length, Int((box.width - 40) / dotStep) + 1)
             let first = box.midX - CGFloat(max(count, 1) - 1) * dotStep / 2
             // the caret: after the last diamond (in the middle, nothing typed yet), blinking
             if caretOn && !boxClosing && dotsAlpha > 0 {
@@ -4286,9 +4289,10 @@ final class LockFace: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// whatever the face redraws (a blink, a letter typed, the box moving), the box's marks over the glass too
-    override var needsDisplay: Bool {
-        didSet { if needsDisplay, marks.superview != nil { marks.needsDisplay = true } }
+    /// the face drawn again, and the box's marks over the glass with it (a blink, a letter typed, the box shaking)
+    private func redraw() {
+        needsDisplay = true
+        if marks.superview != nil { marks.needsDisplay = true }
     }
 
     /// UNLOCK down the screen's middle, as the desk's words and the apps' side buttons: a letter to a step
@@ -6279,6 +6283,47 @@ if CommandLine.arguments.contains("--lid-test") {
     Knocks.shared.testing = { Knocks.log(String(format: "felt %.3fg", $0)) }
     Knocks.shared.start()
     RunLoop.main.run(until: Date().addingTimeInterval(4.2))
+    exit(0)
+}
+
+// ReDesk --render-lock <file.png>: the lock screen's face, its password box open with a few letters in, drawn
+// into a picture (to look at it); no desk, nothing locked
+if let at = CommandLine.arguments.firstIndex(of: "--render-lock"), at + 1 < CommandLine.arguments.count {
+    let out = URL(fileURLWithPath: CommandLine.arguments[at + 1])
+    _ = NSApplication.shared
+    _ = letterFont
+    let frame = NSRect(x: 0, y: 0, width: 1200, height: 700)
+    let window = LockWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    let container = NSView(frame: frame)
+    container.wantsLayer = true
+    container.layer?.backgroundColor = NSColor(calibratedRed: 0.32, green: 0.3, blue: 0.27, alpha: 1).cgColor
+    let face = LockFace(frame: frame, main: true)
+    container.addSubview(face)
+    window.contentView = container
+    window.orderFrontRegardless()
+    window.level = .screenSaver
+    NSApp.setActivationPolicy(.accessory)
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    face.openField(with: "")
+    RunLoop.main.run(until: Date().addingTimeInterval(1.0))
+    // typed as a person types: through the field's editor, a letter at a time
+    for ch in "secret1" {
+        (face.field?.currentEditor() as? NSTextView)?.insertText(String(ch), replacementRange: NSRange(location: NSNotFound, length: 0))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    // as the window server shows it (the glass composited), beside the view's own drawing
+    if let shot = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming]) {
+        let rep = NSBitmapImageRep(cgImage: shot)
+        try? rep.representation(using: .png, properties: [:])?.write(to: out.deletingPathExtension().appendingPathExtension("screen.png"))
+    }
+    container.layoutSubtreeIfNeeded()
+    container.displayIfNeeded()
+    if let rep = container.bitmapImageRepForCachingDisplay(in: container.bounds) {
+        container.cacheDisplay(in: container.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: out)
+    }
     exit(0)
 }
 
