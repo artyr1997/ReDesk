@@ -5065,7 +5065,7 @@ final class SettingsPopup: Popup {
     override func width(on screen: NSRect) -> CGFloat { min(1080, screen.width - 80) }
 
     override func build() -> NSView {
-        // two columns: the desk and its wallpaper on the left, the screen on the right
+        // two columns: the desk on the left, the screen and its wallpaper on the right
         var left: [NSView] = [], right: [NSView] = []
         func section(_ name: String, _ rows: [NSView], right isRight: Bool = false) {
             var views = isRight ? right : left
@@ -5109,7 +5109,6 @@ final class SettingsPopup: Popup {
         }
         wallpaper.append(toggleRow("Blur wallpaper", WallpaperBlur.on, note: "⌘⇧B") { WallpaperBlur.on = $0 })
         wallpaper.append(toggleRow("Video wallpaper stands still", LiveWallpaper.shared.frozen, note: "⌘⇧M") { LiveWallpaper.shared.frozen = $0 })
-        section("Wallpaper", wallpaper)
 
         var screen: [NSView] = [
             buttonRow("Lock screen", "Lock", note: "⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
@@ -5118,6 +5117,7 @@ final class SettingsPopup: Popup {
             screen.append(toggleRow("Brightness by lid", LidLight.shared.on) { LidLight.shared.on = $0 })
         }
         section("Screen", screen, right: true)
+        section("Wallpaper", wallpaper, right: true)
 
         let columns = NSStackView(views: [column(left, spacing: 12), column(right, spacing: 12)])
         columns.orientation = .horizontal
