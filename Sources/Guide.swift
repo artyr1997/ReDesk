@@ -30,7 +30,7 @@ final class GuidePopup: Popup {
               words: "re: desk is the desk your Re apps live on: four words in the corners, your windows tiled in the middle, the wallpaper behind them. This guide shows what it does, one thing a slide.",
               keys: { "→  the next slide" }, media: "welcome.mp4"),
         Slide(title: "Before you begin",
-              words: "For the desk to be truly quiet and calm, four small steps:\n1   Clear your desktop: put the files on it into a folder.\n2   Hide the menu bar: System Settings › Menu Bar › Automatically hide and show the menu bar.\n3   Hide the Dock: System Settings › Desktop & Dock › Automatically hide and show the Dock.\n4   Quit the apps you don't need, and keep just the five: re: desk, file, surf, term and note.",
+              words: "For a quiet desk:\n1   Clear the desktop.\n2   Hide the menu bar.\n3   Hide the Dock.\n4   Keep only the Re apps open.",
               keys: { "⌥⌘D  hide the Dock at once" }, media: "calm.jpg",
               open: [("Menu Bar", "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"),
                      ("Desktop & Dock", "x-apple.systempreferences:com.apple.Desktop-Settings.extension")]),
@@ -79,7 +79,7 @@ final class GuidePopup: Popup {
         Slide(title: "Support re: space",
               words: "re: space is made by one person, slowly and with care. If the quiet desk makes your days a little calmer, you can buy me a coffee: it keeps the apps growing.",
               keys: { "ko-fi.com/artursavytskyi" }, media: nil,
-              open: [("Donate on Ko-fi", donateURL.absoluteString)], big: "♡"),
+              open: [("Donate on Ko-fi", donateURL.absoluteString)], big: ""),
     ]
 
     private var index = 0
