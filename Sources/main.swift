@@ -5260,8 +5260,11 @@ final class SettingsPopup: Popup {
         columns.alignment = .top
         columns.distribution = .fillEqually
         columns.spacing = 56
-        let footer = NSStackView(views: [words("⌘, settings  ·  ⌘/ keys", size: 13, alpha: 0.4), NSView(), button("Quit") { _ in NSApp.terminate(nil) }])
+        let footer = NSStackView(views: [words("⌘, settings  ·  ⌘/ keys", size: 13, alpha: 0.4), NSView(),
+                                         button("Donate") { [weak self] _ in self?.close(); NSWorkspace.shared.open(donateURL) },
+                                         button("Quit") { _ in NSApp.terminate(nil) }])
         footer.orientation = .horizontal
+        footer.spacing = 36
         footer.alignment = .centerY
         let views: [NSView] = [heading("Re:Desk"), divider(), columns, divider(), footer]
         let stack = column(views, spacing: 12)

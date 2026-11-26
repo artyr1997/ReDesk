@@ -1,6 +1,9 @@
 import AppKit
 import AVFoundation
 
+/// where one can give something for re: space (the guide's last slide, Settings › DONATE)
+let donateURL = URL(string: "https://ko-fi.com/artursavytskyi")!
+
 /// The guide: a popup over the whole screen (opening as the apps' windows do), one thing ReDesk does a slide,
 /// its words on the left and on the right a few seconds of the film showing it (Resources/guide/*.mp4, looped,
 /// silent; a picture for the popups). ← → or BACK / NEXT step through the slides. It opens by itself the first
@@ -14,21 +17,23 @@ final class GuidePopup: Popup {
         let words: String
         let keys: () -> String
         let media: String?
-        /// buttons opening a pane of System Settings: its name, its address
+        /// buttons opening a pane of System Settings (or a page): its name, its address
         var open: [(String, String)] = []
+        /// with no film or picture: what stands large in its place (else the slide's first keys)
+        var big: String? = nil
     }
 
     private static func key(_ k: DeskKey) -> String { k.shortcut.text }
 
     static let slides: [Slide] = [
+        Slide(title: "Welcome to re: desk",
+              words: "re: desk is the desk your Re apps live on: four words in the corners, your windows tiled in the middle, the wallpaper behind them. This guide shows what it does, one thing a slide.",
+              keys: { "→  the next slide" }, media: "welcome.mp4"),
         Slide(title: "Before you begin",
               words: "For the desk to be truly quiet and calm, four small steps:\n1   Clear your desktop: put the files on it into a folder.\n2   Hide the menu bar: System Settings › Menu Bar › Automatically hide and show the menu bar.\n3   Hide the Dock: System Settings › Desktop & Dock › Automatically hide and show the Dock.\n4   Quit the apps you don't need, and keep just the five: re: desk, file, surf, term and note.",
               keys: { "⌥⌘D  hide the Dock at once" }, media: "calm.jpg",
               open: [("Menu Bar", "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"),
                      ("Desktop & Dock", "x-apple.systempreferences:com.apple.Desktop-Settings.extension")]),
-        Slide(title: "Welcome to re: desk",
-              words: "re: desk is the desk your Re apps live on: four words in the corners, your windows tiled in the middle, the wallpaper behind them. This guide shows what it does, one thing a slide.",
-              keys: { "→  the next slide" }, media: "welcome.mp4"),
         Slide(title: "Open an app",
               words: "Click a word in a corner: FILE, SURF, TERM or NOTE opens ReFile, ReSurf, ReTerm or ReNote. With nothing but the desk in front, its letter alone does it too.",
               keys: { [DeskKey.openFile, .openSurf, .openTerm, .openNote].map(key).joined(separator: "   ") }, media: "open.mp4"),
@@ -71,6 +76,10 @@ final class GuidePopup: Popup {
         Slide(title: "Come back any time",
               words: "Forgot a key, or something isn't clear? This guide opens again whenever you like, from the desk or any Re app.",
               keys: { "\(key(.guide))  this guide" }, media: nil),
+        Slide(title: "Support re: space",
+              words: "re: space is made by one person, slowly and with care. If the quiet desk makes your days a little calmer, you can buy me a coffee: it keeps the apps growing.",
+              keys: { "ko-fi.com/artursavytskyi" }, media: nil,
+              open: [("Donate on Ko-fi", donateURL.absoluteString)], big: "♡"),
     ]
 
     private var index = 0
@@ -148,7 +157,7 @@ final class GuidePage: NSView {
     init(popup: GuidePopup, index: Int, height: CGFloat) {
         self.popup = popup
         let slide = GuidePopup.slides[index]
-        media = GuideMedia(name: slide.media, keys: slide.keys())
+        media = GuideMedia(name: slide.media, keys: slide.big ?? slide.keys())
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: height).isActive = true
