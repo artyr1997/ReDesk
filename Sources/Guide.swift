@@ -14,11 +14,18 @@ final class GuidePopup: Popup {
         let words: String
         let keys: () -> String
         let media: String?
+        /// buttons opening a pane of System Settings: its name, its address
+        var open: [(String, String)] = []
     }
 
     private static func key(_ k: DeskKey) -> String { k.shortcut.text }
 
     static let slides: [Slide] = [
+        Slide(title: "Before you begin",
+              words: "For the desk to be truly quiet and calm, four small steps:\n1   Clear your desktop: put the files on it into a folder.\n2   Hide the menu bar: System Settings › Menu Bar › Automatically hide and show the menu bar.\n3   Hide the Dock: System Settings › Desktop & Dock › Automatically hide and show the Dock.\n4   Quit the apps you don't need, and keep just the five: re: desk, file, surf, term and note.",
+              keys: { "⌥⌘D  hide the Dock at once" }, media: "calm.jpg",
+              open: [("Menu Bar", "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"),
+                     ("Desktop & Dock", "x-apple.systempreferences:com.apple.Desktop-Settings.extension")]),
         Slide(title: "Welcome to re: desk",
               words: "re: desk is the desk your Re apps live on: four words in the corners, your windows tiled in the middle, the wallpaper behind them. This guide shows what it does, one thing a slide.",
               keys: { "→  the next slide" }, media: "welcome.mp4"),
@@ -170,7 +177,15 @@ final class GuidePage: NSView {
             .font: Popup.noto(14), .foregroundColor: Popup.text.withAlphaComponent(0.7), .kern: 1.4, .paragraphStyle: paragraph,
         ])
         keys.isSelectable = false
-        let text = NSStackView(views: [number, title, words, keys])
+        var opens: [NSView] = []
+        if !slide.open.isEmpty {
+            let row = NSStackView(views: slide.open.map { name, address in
+                button(popup, name, alpha: 1, framed: true) { if let url = URL(string: address) { NSWorkspace.shared.open(url) } }
+            })
+            row.spacing = 18
+            opens.append(row)
+        }
+        let text = NSStackView(views: [number, title, words, keys] + opens)
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 22
@@ -239,12 +254,21 @@ final class GuidePage: NSView {
     func stop() { media.stop() }
 
     /// a control as the apps write theirs: spaced capitals
-    private func button(_ popup: Popup, _ title: String, alpha: CGFloat, _ run: @escaping () -> Void) -> NSButton {
+    private func button(_ popup: Popup, _ title: String, alpha: CGFloat, framed: Bool = false, _ run: @escaping () -> Void) -> NSButton {
         let button = NSButton(title: "", target: nil, action: nil)
         button.isBordered = false
         button.attributedTitle = NSAttributedString(string: tr(title).uppercased(), attributes: [
             .font: Popup.noto(13), .kern: 3.2, .foregroundColor: Popup.text.withAlphaComponent(alpha),
         ])
+        if framed {
+            // a thin line round it, as the apps' buttons on glass
+            button.wantsLayer = true
+            button.layer?.borderWidth = 1
+            button.layer?.borderColor = Popup.text.withAlphaComponent(0.5).cgColor
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            button.widthAnchor.constraint(equalToConstant: button.attributedTitle.size().width + 44).isActive = true
+        }
         let action = popup.act { _ in run() }
         button.target = action
         button.action = #selector(Do.fire(_:))
