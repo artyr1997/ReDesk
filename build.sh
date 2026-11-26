@@ -36,8 +36,9 @@ else
   codesign --force -s - -r='designated => identifier "com.artursavytskyi.redesk"' "$APP"
 fi
 if [ "$1" = "--install" ]; then
-	DEST=/Applications/ReSpace
-	[ -d "$DEST" ] || DEST=/Applications
+	# where it is already: straight in /Applications, or in /Applications/ReSpace; new: /Applications
+	DEST=/Applications
+	[ ! -d /Applications/ReDesk.app ] && [ -d /Applications/ReSpace/ReDesk.app ] && DEST=/Applications/ReSpace
 	pkill -x ReDesk || true
 	rm -rf "$DEST/ReDesk.app"
 	cp -R "$APP" "$DEST/"
