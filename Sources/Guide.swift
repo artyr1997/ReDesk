@@ -157,7 +157,7 @@ final class GuidePage: NSView {
     init(popup: GuidePopup, index: Int, height: CGFloat) {
         self.popup = popup
         let slide = GuidePopup.slides[index]
-        media = GuideMedia(name: slide.media, keys: slide.big ?? slide.keys())
+        media = GuideMedia(name: slide.media, keys: slide.big ?? slide.keys(), bare: slide.big != nil)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: height).isActive = true
@@ -292,11 +292,15 @@ final class GuideMedia: NSView {
     private var looper: AVPlayerLooper?
     private let inset: CGFloat = 16
 
-    init(name: String?, keys: String) {
+    /// only what stands large, on the popup's own glass: no box under it, no + round it
+    private let bare: Bool
+
+    init(name: String?, keys: String, bare: Bool = false) {
+        self.bare = bare
         super.init(frame: .zero)
         let inner = NSView()
         inner.wantsLayer = true
-        inner.layer?.backgroundColor = NSColor(white: 0, alpha: 0.35).cgColor
+        inner.layer?.backgroundColor = bare ? nil : NSColor(white: 0, alpha: 0.35).cgColor
         inner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(inner)
         NSLayoutConstraint.activate([
@@ -365,6 +369,7 @@ final class GuideMedia: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        guard !bare else { return }
         let box = bounds.insetBy(dx: inset - 6, dy: inset - 6)
         let path = NSBezierPath()
         let arm = PlusMarks.arm
