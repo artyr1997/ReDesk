@@ -5248,6 +5248,7 @@ final class SettingsPopup: Popup {
         var screen: [NSView] = [
             buttonRow("Lock screen", "Lock", note: "⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
             buttonRow("Guide", "Open", note: DeskKey.guide.shortcut.text) { [weak self] in self?.close(); GuidePopup.shared.show() },
+            toggleRow("Guide at start", GuidePopup.atStart, indent: 18) { GuidePopup.atStart = $0 },
         ]
         if LidLight.shared.available {
             screen.append(toggleRow("Brightness by lid", LidLight.shared.on) { LidLight.shared.on = $0 })
@@ -5638,8 +5639,8 @@ final class Desk: NSObject, NSApplicationDelegate {
         }
         CommandKeys.install()
         LidLight.shared.start()
-        // the first time ReDesk starts: the guide
-        GuidePopup.firstTime()
+        // each time ReDesk starts: the guide
+        GuidePopup.whenStarting()
         Desktops.shared.start()
     }
 

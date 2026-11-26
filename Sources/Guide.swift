@@ -6,8 +6,8 @@ let donateURL = URL(string: "https://ko-fi.com/artursavytskyi")!
 
 /// The guide: a popup over the whole screen (opening as the apps' windows do), one thing ReDesk does a slide,
 /// its words on the left and on the right a few seconds of the film showing it (Resources/guide/*.mp4, looped,
-/// silent; a picture for the popups). ← → or BACK / NEXT step through the slides. It opens by itself the first
-/// time ReDesk starts, and with ⌘G (DeskKey.guide) whenever one likes.
+/// silent; a picture for the popups). ← → or BACK / NEXT step through the slides. It opens by itself each time
+/// ReDesk starts (Settings › Guide at start), and with ⌘G (DeskKey.guide) whenever one likes.
 final class GuidePopup: Popup {
     static let shared = GuidePopup(width: 1600)
 
@@ -131,10 +131,14 @@ final class GuidePopup: Popup {
         }
     }
 
-    /// the first time ReDesk starts: the guide, once the desk has come up
-    static func firstTime() {
-        guard !UserDefaults.standard.bool(forKey: "guideSeen") else { return }
-        UserDefaults.standard.set(true, forKey: "guideSeen")
+    /// each time ReDesk starts (unless turned off in Settings): the guide, once the desk has come up
+    static var atStart: Bool {
+        get { UserDefaults.standard.object(forKey: "guideAtStart") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "guideAtStart") }
+    }
+
+    static func whenStarting() {
+        guard atStart else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { shared.show() }
     }
 
