@@ -1177,7 +1177,7 @@ enum Settable: Equatable {
 
 /// The desk's own keys, each one a thing it does: as they come, or as set in the keys' popup (⌘/), kept.
 enum DeskKey: String, CaseIterable {
-    case settings, keys, dashboard, lock, appearance, language, stillWallpaper, blurWallpaper
+    case settings, keys, guide, dashboard, lock, appearance, language, stillWallpaper, blurWallpaper
     case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, focusDesk, sidesIn, sidesOut, wordsIn, wordsOut
     case focusLeft, focusRight, focusUp, focusDown, tradeLeft, tradeRight, tradeUp, tradeDown
     case resizeLeft, resizeRight, resizeUp, resizeDown
@@ -1190,6 +1190,7 @@ enum DeskKey: String, CaseIterable {
         switch self {
         case .settings: "settings"
         case .keys: "these keys"
+        case .guide: "the guide"
         case .dashboard: "the dashboard: the Mac now"
         case .lock: "lock screen"
         case .appearance: "light / dark"
@@ -1248,6 +1249,7 @@ enum DeskKey: String, CaseIterable {
         switch self {
         case .settings: return Shortcut(key: kVK_ANSI_Comma, flags: cmd)
         case .keys: return Shortcut(key: kVK_ANSI_Slash, flags: cmd)
+        case .guide: return Shortcut(key: kVK_ANSI_G, flags: cmd)
         case .dashboard: return Shortcut(key: kVK_ANSI_D, flags: ctrlAlt)
         case .lock: return Shortcut(key: kVK_ANSI_L, flags: cmd)
         case .appearance: return Shortcut(key: kVK_ANSI_T, flags: cmdShift)
@@ -1333,9 +1335,10 @@ enum DeskKey: String, CaseIterable {
 
     func run() {
         switch self {
-        case .settings: KeysPopup.shared.close(); DashboardPopup.shared.close(); SettingsPopup.shared.toggle()
-        case .keys: SettingsPopup.shared.close(); DashboardPopup.shared.close(); KeysPopup.shared.toggle()
-        case .dashboard: SettingsPopup.shared.close(); KeysPopup.shared.close(); DashboardPopup.shared.toggle()
+        case .settings: KeysPopup.shared.close(); DashboardPopup.shared.close(); GuidePopup.shared.close(); SettingsPopup.shared.toggle()
+        case .keys: SettingsPopup.shared.close(); DashboardPopup.shared.close(); GuidePopup.shared.close(); KeysPopup.shared.toggle()
+        case .guide: SettingsPopup.shared.close(); DashboardPopup.shared.close(); KeysPopup.shared.close(); GuidePopup.shared.toggle()
+        case .dashboard: SettingsPopup.shared.close(); KeysPopup.shared.close(); GuidePopup.shared.close(); DashboardPopup.shared.toggle()
         case .lock: LockScreen.shared.show()
         case .appearance: Appearance.toggle()
         case .language: Language.toggle()
@@ -4906,7 +4909,9 @@ class Popup: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { close() }
-    override func resignKey() { super.resignKey(); close() }
+    override func resignKey() { super.resignKey(); if closesWhenLeft { close() } }
+    /// closed when another window takes the keys (the guide stays: a permission's question may come over it)
+    var closesWhenLeft: Bool { true }
 
     // ── opening and closing as the apps' windows do (Opening.swift): the corners' + first, round the whole
     // width but a quarter of the height, in the middle; the paper fills them and grows to the whole height;
@@ -5242,6 +5247,7 @@ final class SettingsPopup: Popup {
 
         var screen: [NSView] = [
             buttonRow("Lock screen", "Lock", note: "⌘L") { [weak self] in self?.close(); LockScreen.shared.show() },
+            buttonRow("Guide", "Open", note: DeskKey.guide.shortcut.text) { [weak self] in self?.close(); GuidePopup.shared.show() },
         ]
         if LidLight.shared.available {
             screen.append(toggleRow("Brightness by lid", LidLight.shared.on) { LidLight.shared.on = $0 })
@@ -5275,7 +5281,7 @@ final class KeysPopup: Popup {
         // "@name": a key one can set (a click, then the new keys): the desk's own (DeskKey) or an app's (AppKey,
         // "@ReSurf.newTab"). Alone, its words are its own; with others ("@a / @b"), the words given.
         ("Re:Desk", [
-            (nil, [("@settings", ""), ("@keys", ""), ("@dashboard", ""), ("@lock", ""), ("@appearance", ""), ("@language", ""),
+            (nil, [("@settings", ""), ("@keys", ""), ("@guide", ""), ("@dashboard", ""), ("@lock", ""), ("@appearance", ""), ("@language", ""),
                    ("@stillWallpaper", ""), ("@blurWallpaper", "")]),
             ("Windows", [("@focusLeft @focusRight @focusUp @focusDown", "focus the nearest window"),
                          ("@tradeLeft @tradeRight @tradeUp @tradeDown", "trade places with it"),
@@ -5629,6 +5635,8 @@ final class Desk: NSObject, NSApplicationDelegate {
         }
         CommandKeys.install()
         LidLight.shared.start()
+        // the first time ReDesk starts: the guide
+        GuidePopup.firstTime()
         Desktops.shared.start()
     }
 
@@ -5865,6 +5873,7 @@ if let at = CommandLine.arguments.firstIndex(of: "--render-popups"), at + 1 < Co
     }
     render(SettingsPopup.shared, "settings\(suffix).png")
     render(KeysPopup.shared, "keys\(suffix).png")
+    GuidePopup.shared.render { render(GuidePopup.shared, String(format: "guide-%02d\(suffix).png", $0 + 1)) }
     // the dashboard with a few seconds of what it reads
     DashboardPopup.shared.warmUp()
     render(DashboardPopup.shared, "dashboard\(suffix).png")

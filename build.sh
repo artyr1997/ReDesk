@@ -12,7 +12,7 @@ done
 lipo -create -output "$APP/Contents/MacOS/ReDesk" build/ReDesk-arm64 build/ReDesk-x86_64
 rm -f build/ReDesk-arm64 build/ReDesk-x86_64
 cp Info.plist "$APP/Contents/"
-cp Resources/* "$APP/Contents/Resources/"
+cp -R Resources/* "$APP/Contents/Resources/"
 cp -R wallpapers "$APP/Contents/Resources/"
 # ad-hoc, but known by its identifier rather than by this build's hash, so macOS keeps
 # the Accessibility and audio permissions from one build to the next
