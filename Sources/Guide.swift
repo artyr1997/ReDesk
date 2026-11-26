@@ -55,7 +55,7 @@ final class GuidePopup: Popup {
               words: "Flush joins the windows into one glass, with no gaps between them. Almost Full lets them take the whole screen, just under the menu bar.",
               keys: { "\(key(.flush))  flush   \(key(.almostFull))  almost full" }, media: "flush.mp4"),
         Slide(title: "Wallpapers and desktops",
-              words: "Step through your wallpapers, pictures and videos, or add one from YouTube in Settings. Each desktop keeps its own windows: move between them, or take the window in front with you.",
+              words: "Step through your wallpapers, pictures and videos. Each desktop keeps its own windows: move between them, or take the window in front with you.",
               keys: { "\(key(.wallpaperBack)) \(key(.wallpaperNext))  wallpaper\n\(key(.desktopUp)) \(key(.desktopDown))  desktop\n\(key(.carryUp)) \(key(.carryDown))  take the window there" },
               media: "wallpaper.mp4"),
         Slide(title: "Your spacing",

@@ -65,7 +65,6 @@ private let japaneseWords: [String: String] = [
     "Plus marks": "角に十字",
     "Open at login": "ログイン時に開く",
     "Wallpaper": "壁紙",
-    "Wallpaper from YouTube": "YouTubeの壁紙",
     "Add": "追加",
     "This wallpaper": "この壁紙",
     "Remove": "削除",
@@ -92,15 +91,6 @@ private let japaneseWords: [String: String] = [
     "One at a Time": "一つずつ",
     "Full Screen": "全画面",
 
-    // ── a wallpaper from YouTube ──
-    "Paste a link: the video plays from YouTube in its best quality, without sound.":
-        "リンクを貼り付けてください。動画はYouTubeから最高画質・無音で再生されます。",
-    "Cancel": "キャンセル",
-    "No wallpaper from YouTube": "YouTubeの壁紙を追加できません",
-    "That isn't a YouTube link.": "YouTubeのリンクではありません。",
-    "It takes yt-dlp: brew install yt-dlp": "yt-dlpが必要です：brew install yt-dlp",
-    "YouTube didn't give the video.": "YouTubeから動画を取得できませんでした。",
-    "It couldn't be kept.": "保存できませんでした。",
 
     // ── the lock screen ──
     "UNLOCK": "解除",
