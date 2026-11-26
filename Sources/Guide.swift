@@ -279,6 +279,11 @@ final class GuideMedia: NSView {
         }
         let still = NSImageView()
         still.imageScaling = .scaleProportionallyUpOrDown
+        // the picture fits the slide, never the slide the picture (its own size would push the popup off the screen)
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            still.setContentCompressionResistancePriority(.fittingSizeCompression, for: axis)
+            still.setContentHuggingPriority(.fittingSizeCompression, for: axis)
+        }
         still.translatesAutoresizingMaskIntoConstraints = false
         inner.addSubview(still)
         NSLayoutConstraint.activate([
