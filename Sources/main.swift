@@ -1003,25 +1003,108 @@ struct AppKey: Equatable {
     }
 
     static let all: [AppKey] = [
-        key("ReFile", "newWindow", "new window", kVK_ANSI_N),
-        key("ReSurf", "newWindow", "new window", kVK_ANSI_N),
-        key("ReSurf", "newTab", "new tab", kVK_ANSI_T),
-        key("ReSurf", "address", "address", kVK_ANSI_L),
-        key("ReSurf", "closeTab", "close tab", kVK_ANSI_W, [.maskCommand, .maskShift]),
-        key("ReSurf", "nextTab", "next tab", kVK_Tab, .maskControl),
-        key("ReSurf", "reload", "reload", kVK_ANSI_R),
-        key("ReSurf", "favourite", "favourite", kVK_ANSI_D),
-        key("ReSurf", "video", "video fills the page", kVK_ANSI_F),
-        key("ReSurf", "pageFull", "page fills the window", kVK_ANSI_F, [.maskCommand, .maskShift]),
-        key("ReSurf", "info", "info", kVK_ANSI_I),
-        key("ReNote", "newWindow", "new window", kVK_ANSI_N),
-        key("ReNote", "save", "save", kVK_ANSI_S),
-        key("ReNote", "highlight", "highlight", kVK_ANSI_B),
-        key("ReNote", "draw", "draw", kVK_ANSI_D),
-        key("ReNote", "undo", "undo", kVK_ANSI_Z),
-        key("ReTerm", "newWindow", "new window", kVK_ANSI_N),
-        key("ReTerm", "wholeWindow", "the whole window", kVK_ANSI_F, [.maskCommand, .maskShift]),
-        key("ReTerm", "newConversation", "new conversation", kVK_ANSI_K),
+        key("ReFile", "newWindow", "new window", 45, .maskCommand),
+        key("ReFile", "allInside", "all inside", 36, .maskShift),
+        key("ReFile", "up", "up", 126, []),
+        key("ReFile", "down", "down", 125, []),
+        key("ReFile", "left", "the folder above, the page before", 123, []),
+        key("ReFile", "right", "open, the next page", 124, []),
+        key("ReFile", "enter", "open, write in a cell", 36, []),
+        key("ReFile", "search", "search", 44, []),
+        key("ReFile", "columns", "columns", 8, []),
+        key("ReFile", "list", "list", 37, []),
+        key("ReFile", "sortName", "sort by name", 18, [.maskControl, .maskCommand]),
+        key("ReFile", "sortKind", "sort by kind", 19, [.maskControl, .maskCommand]),
+        key("ReFile", "sortDate", "sort by date", 20, [.maskControl, .maskCommand]),
+        key("ReFile", "sortSize", "sort by size", 21, [.maskControl, .maskCommand]),
+        key("ReFile", "newFolder", "new folder", 45, []),
+        key("ReFile", "info", "info", 34, []),
+        key("ReFile", "trash", "move to the Trash", 51, []),
+        key("ReFile", "folder", "folder", 18, []),
+        key("ReFile", "songs", "songs", 19, []),
+        key("ReFile", "radio", "radio", 20, []),
+        key("ReFile", "space", "play / pause, turn the page", 49, []),
+        key("ReFile", "shuffle", "shuffle", 1, []),
+        key("ReFile", "repeat", "repeat", 15, []),
+        key("ReFile", "queue", "queue", 12, []),
+        key("ReFile", "keep", "keep a station", 40, []),
+        key("ReFile", "mini", "mini player, manga", 46, []),
+        key("ReFile", "full", "full screen", 3, []),
+        key("ReFile", "moreLeft", "more cells ←", 123, .maskShift),
+        key("ReFile", "moreRight", "more cells →", 124, .maskShift),
+        key("ReFile", "moreUp", "more cells ↑", 126, .maskShift),
+        key("ReFile", "moreDown", "more cells ↓", 125, .maskShift),
+        key("ReFile", "selectAll", "all cells", 0, .maskCommand),
+        key("ReFile", "copy", "copy", 8, .maskCommand),
+        key("ReFile", "cut", "cut", 7, .maskCommand),
+        key("ReFile", "paste", "paste", 9, .maskCommand),
+        key("ReFile", "addLeft", "a column ←", 123, [.maskShift, .maskCommand]),
+        key("ReFile", "addRight", "a column →", 124, [.maskShift, .maskCommand]),
+        key("ReFile", "addUp", "a row ↑", 126, [.maskShift, .maskCommand]),
+        key("ReFile", "addDown", "a row ↓", 125, [.maskShift, .maskCommand]),
+        key("ReFile", "deleteRow", "delete the row", 51, .maskCommand),
+        key("ReFile", "deleteColumn", "delete the column", 51, [.maskShift, .maskCommand]),
+        key("ReFile", "sortDown", "sort by the column, down", 125, [.maskControl, .maskShift]),
+        key("ReFile", "sortUp", "sort by the column, up", 126, [.maskControl, .maskShift]),
+        key("ReFile", "undo", "undo", 6, .maskCommand),
+        key("ReFile", "redo", "redo", 6, [.maskShift, .maskCommand]),
+        key("ReSurf", "newWindow", "new window", 45, .maskCommand),
+        key("ReSurf", "newTab", "new tab", 17, .maskCommand),
+        key("ReSurf", "address", "address", 37, .maskCommand),
+        key("ReSurf", "closeTab", "close tab", 13, [.maskCommand, .maskShift]),
+        key("ReSurf", "nextTab", "next tab", 48, .maskControl),
+        key("ReSurf", "tabUp", "previous tab", 126, .maskShift),
+        key("ReSurf", "tabDown", "next tab", 125, .maskShift),
+        key("ReSurf", "back", "back", 33, .maskCommand),
+        key("ReSurf", "forward", "forward", 30, .maskCommand),
+        key("ReSurf", "reload", "reload", 15, .maskCommand),
+        key("ReSurf", "favourite", "favourite", 2, .maskCommand),
+        key("ReSurf", "video", "video fills the page", 3, .maskCommand),
+        key("ReSurf", "pageFull", "page fills the window", 3, [.maskCommand, .maskShift]),
+        key("ReSurf", "info", "info", 34, .maskCommand),
+        key("ReSurf", "left", "previous page", 123, []),
+        key("ReSurf", "right", "next page", 124, []),
+        key("ReSurf", "up", "choose ↑", 126, []),
+        key("ReSurf", "down", "choose ↓", 125, []),
+        key("ReSurf", "enter", "open", 36, []),
+        key("ReNote", "newWindow", "new window", 45, .maskCommand),
+        key("ReNote", "up", "the note above", 126, []),
+        key("ReNote", "down", "the note below", 125, []),
+        key("ReNote", "left", "the space before", 123, []),
+        key("ReNote", "right", "the next space", 124, []),
+        key("ReNote", "newNote", "new note", 45, []),
+        key("ReNote", "edit", "edit", 14, []),
+        key("ReNote", "enter", "edit", 36, []),
+        key("ReNote", "search", "search", 44, []),
+        key("ReNote", "find", "search", 3, .maskCommand),
+        key("ReNote", "delete", "delete", 51, []),
+        key("ReNote", "esc", "home, back", 53, []),
+        key("ReNote", "save", "save", 1, .maskCommand),
+        key("ReNote", "highlight", "highlight", 11, .maskCommand),
+        key("ReNote", "draw", "draw", 2, .maskCommand),
+        key("ReNote", "undo", "undo", 6, .maskCommand),
+        key("ReNote", "redo", "redo", 6, [.maskCommand, .maskShift]),
+        key("ReNote", "redoY", "redo", 16, .maskControl),
+        key("ReTerm", "newWindow", "new window", 45, .maskCommand),
+        key("ReTerm", "term", "TERM", 17, [.maskCommand, .maskShift]),
+        key("ReTerm", "chat", "CHAT", 8, [.maskCommand, .maskShift]),
+        key("ReTerm", "wholeWindow", "the whole window", 3, [.maskCommand, .maskShift]),
+        key("ReTerm", "newConversation", "new conversation", 40, .maskCommand),
+        key("ReTerm", "conversationUp", "the conversation above", 126, .maskShift),
+        key("ReTerm", "conversationDown", "the conversation below", 125, .maskShift),
+        key("ReTerm", "deleteConversation", "delete the conversation", 51, [.maskCommand, .maskShift]),
+        key("ReTerm", "up", "before", 126, []),
+        key("ReTerm", "down", "after", 125, []),
+        key("ReTerm", "tab", "complete, the next provider", 48, []),
+        key("ReTerm", "stop", "stop / clear the line", 8, .maskControl),
+        key("ReTerm", "end", "end of input", 2, .maskControl),
+        key("ReTerm", "suspend", "suspend", 6, .maskControl),
+        key("ReTerm", "bigger", "text bigger", 24, .maskCommand),
+        key("ReTerm", "smaller", "text smaller", 27, .maskCommand),
+        key("ReTerm", "actualSize", "text as it was", 29, .maskCommand),
+        key("ReTerm", "send", "send", 36, []),
+        key("ReTerm", "newLine", "new line", 36, .maskShift),
+        key("ReTerm", "esc", "stop the answer", 53, []),
     ]
 
     /// "ReSurf.newTab"
@@ -1096,6 +1179,11 @@ enum Settable: Equatable {
 enum DeskKey: String, CaseIterable {
     case settings, keys, dashboard, lock, appearance, language, stillWallpaper, blurWallpaper
     case plusMarks, flush, almostFull, tiling, nextArrangement, promote, pin, otherScreen, focusDesk, sidesIn, sidesOut, wordsIn, wordsOut
+    case focusLeft, focusRight, focusUp, focusDown, tradeLeft, tradeRight, tradeUp, tradeDown
+    case resizeLeft, resizeRight, resizeUp, resizeDown
+    case arrange1, arrange2, arrange3, arrange4, arrange5, arrange6
+    case desktopUp, desktopDown, carryUp, carryDown, wallpaperBack, wallpaperNext
+    case openFile, openSurf, openTerm, openNote
 
     /// its line in the popup
     var title: String {
@@ -1121,8 +1209,38 @@ enum DeskKey: String, CaseIterable {
         case .sidesOut: "further from the edges, across"
         case .wordsIn: "nearer the edges, down"
         case .wordsOut: "further from the edges, down"
+        case .focusLeft, .focusRight, .focusUp, .focusDown: "focus the nearest window"
+        case .tradeLeft, .tradeRight, .tradeUp, .tradeDown: "trade places with it"
+        case .resizeLeft, .resizeRight, .resizeUp, .resizeDown: "resize the window"
+        case .arrange1, .arrange2, .arrange3, .arrange4, .arrange5, .arrange6: "an arrangement"
+        case .desktopUp: "the desktop above"
+        case .desktopDown: "the desktop below"
+        case .carryUp, .carryDown: "take the window there"
+        case .wallpaperBack: "previous wallpaper"
+        case .wallpaperNext: "next wallpaper"
+        case .openFile: "ReFile"
+        case .openSurf: "ReSurf"
+        case .openTerm: "ReTerm"
+        case .openNote: "ReNote"
         }
     }
+
+    /// pressed again and again while held (the arrows); the others once a press
+    var repeats: Bool {
+        switch self {
+        case .focusLeft, .focusRight, .focusUp, .focusDown, .tradeLeft, .tradeRight, .tradeUp, .tradeDown,
+             .resizeLeft, .resizeRight, .resizeUp, .resizeDown, .desktopUp, .desktopDown, .wallpaperBack, .wallpaperNext: true
+        default: false
+        }
+    }
+
+    /// the text's while something is typed (but in ReTerm and ReNote)
+    var textual: Bool {
+        [.focusLeft, .focusRight, .focusUp, .focusDown, .desktopUp, .desktopDown, .wallpaperBack, .wallpaperNext].contains(self)
+    }
+
+    /// only with nothing but the desk in front (a letter alone: anywhere else it is typed)
+    var deskOnly: Bool { [.openFile, .openSurf, .openTerm, .openNote].contains(self) }
 
     var standard: Shortcut {
         let cmd: CGEventFlags = .maskCommand, cmdShift: CGEventFlags = [.maskCommand, .maskShift]
@@ -1150,6 +1268,35 @@ enum DeskKey: String, CaseIterable {
         case .sidesOut: return Shortcut(key: kVK_End, flags: [])
         case .wordsIn: return Shortcut(key: kVK_PageDown, flags: [])
         case .wordsOut: return Shortcut(key: kVK_PageUp, flags: [])
+        case .focusLeft: return Shortcut(key: kVK_LeftArrow, flags: cmd)
+        case .focusRight: return Shortcut(key: kVK_RightArrow, flags: cmd)
+        case .focusUp: return Shortcut(key: kVK_UpArrow, flags: cmd)
+        case .focusDown: return Shortcut(key: kVK_DownArrow, flags: cmd)
+        case .tradeLeft: return Shortcut(key: kVK_LeftArrow, flags: [.maskCommand, .maskAlternate])
+        case .tradeRight: return Shortcut(key: kVK_RightArrow, flags: [.maskCommand, .maskAlternate])
+        case .tradeUp: return Shortcut(key: kVK_UpArrow, flags: [.maskCommand, .maskAlternate])
+        case .tradeDown: return Shortcut(key: kVK_DownArrow, flags: [.maskCommand, .maskAlternate])
+        // ⌘fn and an arrow: ⌘ Home, End, Page Up, Page Down
+        case .resizeLeft: return Shortcut(key: kVK_Home, flags: cmd)
+        case .resizeRight: return Shortcut(key: kVK_End, flags: cmd)
+        case .resizeUp: return Shortcut(key: kVK_PageUp, flags: cmd)
+        case .resizeDown: return Shortcut(key: kVK_PageDown, flags: cmd)
+        case .arrange1: return Shortcut(key: kVK_ANSI_1, flags: cmd)
+        case .arrange2: return Shortcut(key: kVK_ANSI_2, flags: cmd)
+        case .arrange3: return Shortcut(key: kVK_ANSI_3, flags: cmd)
+        case .arrange4: return Shortcut(key: kVK_ANSI_4, flags: cmd)
+        case .arrange5: return Shortcut(key: kVK_ANSI_5, flags: cmd)
+        case .arrange6: return Shortcut(key: kVK_ANSI_6, flags: cmd)
+        case .desktopUp: return Shortcut(key: kVK_UpArrow, flags: .maskAlternate)
+        case .desktopDown: return Shortcut(key: kVK_DownArrow, flags: .maskAlternate)
+        case .carryUp: return Shortcut(key: kVK_UpArrow, flags: [.maskCommand, .maskControl])
+        case .carryDown: return Shortcut(key: kVK_DownArrow, flags: [.maskCommand, .maskControl])
+        case .wallpaperBack: return Shortcut(key: kVK_LeftArrow, flags: .maskAlternate)
+        case .wallpaperNext: return Shortcut(key: kVK_RightArrow, flags: .maskAlternate)
+        case .openFile: return Shortcut(key: kVK_ANSI_F, flags: [])
+        case .openSurf: return Shortcut(key: kVK_ANSI_S, flags: [])
+        case .openTerm: return Shortcut(key: kVK_ANSI_T, flags: [])
+        case .openNote: return Shortcut(key: kVK_ANSI_N, flags: [])
         }
     }
 
@@ -1207,6 +1354,32 @@ enum DeskKey: String, CaseIterable {
         case .sidesOut: spacing("x", 1) { SideMargin.across.move(1) }
         case .wordsIn: spacing("y", -1) { SideMargin.down.move(-1) }
         case .wordsOut: spacing("y", 1) { SideMargin.down.move(1) }
+        case .focusLeft: Tiler.shared.focus(.left)
+        case .focusRight: Tiler.shared.focus(.right)
+        case .focusUp: Tiler.shared.focus(.up)
+        case .focusDown: Tiler.shared.focus(.down)
+        case .tradeLeft: Tiler.shared.move(.left)
+        case .tradeRight: Tiler.shared.move(.right)
+        case .tradeUp: Tiler.shared.move(.up)
+        case .tradeDown: Tiler.shared.move(.down)
+        case .resizeLeft: Tiler.shared.resize(.left)
+        case .resizeRight: Tiler.shared.resize(.right)
+        case .resizeUp: Tiler.shared.resize(.up)
+        case .resizeDown: Tiler.shared.resize(.down)
+        case .arrange1, .arrange2, .arrange3, .arrange4, .arrange5, .arrange6:
+            // in the order of the arrangements' list, tiling on
+            let all: [DeskKey] = [.arrange1, .arrange2, .arrange3, .arrange4, .arrange5, .arrange6]
+            if let n = all.firstIndex(of: self), n < Arrangement.allCases.count { Tiler.shared.choose(Arrangement.allCases[n]) }
+        case .desktopUp: Desktops.shared.step(-1)
+        case .desktopDown: Desktops.shared.step(1)
+        case .carryUp: Desktops.shared.take(-1)
+        case .carryDown: Desktops.shared.take(1)
+        case .wallpaperBack: Wallpapers.step(-1)
+        case .wallpaperNext: Wallpapers.step(1)
+        case .openFile: ReDesk.open(corners[0])
+        case .openSurf: ReDesk.open(corners[1])
+        case .openTerm: ReDesk.open(corners[2])
+        case .openNote: ReDesk.open(corners[3])
         }
     }
 }
@@ -1271,14 +1444,6 @@ enum CommandKeys {
         if SettingsPopup.shared.isVisible { SettingsPopup.shared.refresh() }
     }
 
-    private static let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
-
-    /// F, S, D, N with the desk in front: the app of that letter's corner; T: ReTerm
-    private static let letters = [kVK_ANSI_F: corners[0], kVK_ANSI_S: corners[1], kVK_ANSI_T: corners[2], kVK_ANSI_N: corners[3]]
-
-    private static let arrows: [Int: Tiler.Direction] = [kVK_UpArrow: .up, kVK_DownArrow: .down, kVK_LeftArrow: .left, kVK_RightArrow: .right]
-    /// fn with an arrow: Page Up / Page Down / Home / End
-    private static let fnArrows: [Int: Tiler.Direction] = [kVK_PageUp: .up, kVK_PageDown: .down, kVK_Home: .left, kVK_End: .right]
 
     /// Nothing but the desk in front: ReDesk, or Finder with no window of its own in front (its desktop)
     /// and nothing being typed (a name being changed). What was seen goes to Keys.log.
@@ -1335,46 +1500,11 @@ enum CommandKeys {
         let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
         // the desk's own keys, as kept (set in the popup or as they came)
         let pressed = Shortcut(key: key, flags: flags)
-        if let own = DeskKey.allCases.first(where: { !$0.anywhere && $0.shortcut == pressed }),
-           event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-            return oursInFront() ? { own.run() } : nil
-        }
-        if flags.isEmpty, let corner = letters[key],
-           event.getIntegerValueField(.keyboardEventAutorepeat) == 0, deskInFront() {
-            return { ReDesk.open(corner) }
-        }
-        // the key's action, if it is one of the desk's; `text`: a key that is the text's while typing
-        var text = false
-        let act: (() -> Void)?
-        if flags == .maskCommand, let way = arrows[key] {
-            text = true
-            act = { Tiler.shared.focus(way) }
-        } else if flags == [.maskCommand, .maskAlternate], let way = arrows[key] {
-            act = { Tiler.shared.move(way) }
-        } else if flags == .maskCommand, let way = fnArrows[key] {
-            act = { Tiler.shared.resize(way) }
-        } else if flags == .maskAlternate, let way = arrows[key] {
-            text = true
-            switch way {
-            case .up: act = { Desktops.shared.step(-1) }
-            case .down: act = { Desktops.shared.step(1) }
-            case .left: act = { Wallpapers.step(-1) }
-            case .right: act = { Wallpapers.step(1) }
-            }
-        } else if flags == [.maskCommand, .maskControl], key == kVK_UpArrow || key == kVK_DownArrow {
-            act = { Desktops.shared.take(key == kVK_UpArrow ? -1 : 1) }
-        } else if flags == .maskCommand {
-            // ⌘1…⌘6: an arrangement (in the order of the right-click menu), tiling on
-            if let number = digits.firstIndex(of: key), number < Arrangement.allCases.count {
-                act = { Tiler.shared.choose(Arrangement.allCases[number]) }
-            } else {
-                act = nil
-            }
-        } else {
-            act = nil
-        }
-        guard let act, oursInFront(), !(text && typing()) else { return nil }
-        return act
+        guard let own = DeskKey.allCases.first(where: { !$0.anywhere && $0.shortcut == pressed }) else { return nil }
+        if !own.repeats && event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+        if own.deskOnly { return deskInFront() ? { own.run() } : nil }
+        guard oursInFront(), !(own.textual && typing()) else { return nil }
+        return { own.run() }
     }
 }
 
@@ -5142,45 +5272,58 @@ final class KeysPopup: Popup {
 
     typealias Keys = [(String, String)]
     static let apps: [(name: String, parts: [(String?, Keys)])] = [
+        // "@name": a key one can set (a click, then the new keys): the desk's own (DeskKey) or an app's (AppKey,
+        // "@ReSurf.newTab"). Alone, its words are its own; with others ("@a / @b"), the words given.
         ("Re:Desk", [
-            // "@name": one of the desk's own keys (DeskKey), written as kept and set by a click
             (nil, [("@settings", ""), ("@keys", ""), ("@dashboard", ""), ("@lock", ""), ("@appearance", ""), ("@language", ""),
                    ("@stillWallpaper", ""), ("@blurWallpaper", "")]),
-            ("Windows", [("⌘ ← → ↑ ↓", "focus the nearest window"), ("⌘⌥ ← → ↑ ↓", "trade places with it"),
-                         ("⌘fn ← → ↑ ↓", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
-                         ("@almostFull", ""), ("@tiling", ""), ("⌘1 … ⌘6", "an arrangement"),
+            ("Windows", [("@focusLeft @focusRight @focusUp @focusDown", "focus the nearest window"),
+                         ("@tradeLeft @tradeRight @tradeUp @tradeDown", "trade places with it"),
+                         ("@resizeLeft @resizeRight @resizeUp @resizeDown", "resize the window"), ("@plusMarks", ""), ("@flush", ""),
+                         ("@almostFull", ""), ("@tiling", ""), ("@arrange1 @arrange2 @arrange3 @arrange4 @arrange5 @arrange6", "an arrangement"),
                          ("@nextArrangement", ""), ("@promote", ""), ("@pin", ""), ("@otherScreen", ""), ("@focusDesk", ""),
                          ("@sidesIn", ""), ("@sidesOut", ""), ("@wordsIn", ""), ("@wordsOut", ""),
                          ("fn A ← → ↑ ↓", "the same in every app's windows")]),
-            ("On the desk", [("F / S / T / N", "ReFile / ReSurf / ReTerm / ReNote")]),
-            ("Desktops", [("⌥↑ / ⌥↓", "the desktop above / below"), ("⌘⌃↑ / ⌘⌃↓", "take the window there"),
-                          ("⌥← / ⌥→", "previous / next wallpaper")]),
+            ("On the desk", [("@openFile / @openSurf / @openTerm / @openNote", "ReFile / ReSurf / ReTerm / ReNote")]),
+            ("Desktops", [("@desktopUp / @desktopDown", "the desktop above / below"), ("@carryUp / @carryDown", "take the window there"),
+                          ("@wallpaperBack / @wallpaperNext", "previous / next wallpaper")]),
         ]),
         ("Re:File", [
-            (nil, [("⇧Enter  ⇧F…P", "all inside"), ("@ReFile.newWindow", ""), ("↑ / ↓", "select"), ("→ / Enter", "open"), ("←", "the folder above"), ("/", "search"), ("C / L", "views"), ("⌃⌘1 – 4", "sort: name, kind, date, size"),
-                   ("N", "new folder"), ("I", "info"), ("Backspace", "move to the Trash")]),
-            ("Play", [("1 / 2 / 3", "folder / songs / radio"), ("Space", "play / pause"), ("S / R", "shuffle / repeat"), ("Q", "queue"), ("K", "keep a station"), ("M", "mini player")]),
-            ("View", [("← →  Space", "turn the page"), ("M", "manga"), ("F", "full screen")]),
-            ("Table", [("Enter", "write in a cell"), ("⇧ ← → ↑ ↓  ⌘A", "choose more cells"), ("⌘C / ⌘X / ⌘V", "copy / cut / paste"), ("⇧⌘ ← → ↑ ↓", "add a column / row"), ("⌘⌫ / ⇧⌘⌫", "delete the row / column"), ("⌃⇧↓ / ⌃⇧↑", "sort by the column"), ("⌘Z / ⇧⌘Z", "undo / redo")]),
+            (nil, [("@ReFile.allInside  ⇧F…P", "all inside"), ("@ReFile.newWindow", ""), ("@ReFile.up / @ReFile.down", "select"),
+                   ("@ReFile.right / @ReFile.enter", "open"), ("@ReFile.left", "the folder above"), ("@ReFile.search", "search"),
+                   ("@ReFile.columns / @ReFile.list", "views"), ("@ReFile.sortName @ReFile.sortKind @ReFile.sortDate @ReFile.sortSize", "sort: name, kind, date, size"),
+                   ("@ReFile.newFolder", "new folder"), ("@ReFile.info", "info"), ("@ReFile.trash", "move to the Trash")]),
+            ("Play", [("@ReFile.folder / @ReFile.songs / @ReFile.radio", "folder / songs / radio"), ("@ReFile.space", "play / pause"),
+                      ("@ReFile.shuffle / @ReFile.repeat", "shuffle / repeat"), ("@ReFile.queue", "queue"), ("@ReFile.keep", "keep a station"),
+                      ("@ReFile.mini", "mini player")]),
+            ("View", [("@ReFile.left @ReFile.right @ReFile.space", "turn the page"), ("@ReFile.mini", "manga"), ("@ReFile.full", "full screen")]),
+            ("Table", [("@ReFile.enter", "write in a cell"), ("@ReFile.moreLeft @ReFile.moreRight @ReFile.moreUp @ReFile.moreDown @ReFile.selectAll", "choose more cells"),
+                       ("@ReFile.copy / @ReFile.cut / @ReFile.paste", "copy / cut / paste"),
+                       ("@ReFile.addLeft @ReFile.addRight @ReFile.addUp @ReFile.addDown", "add a column / row"),
+                       ("@ReFile.deleteRow / @ReFile.deleteColumn", "delete the row / column"), ("@ReFile.sortDown / @ReFile.sortUp", "sort by the column"),
+                       ("@ReFile.undo / @ReFile.redo", "undo / redo")]),
         ]),
         ("Re:Surf", [
-            (nil, [("@ReSurf.newWindow", ""), ("@ReSurf.newTab", ""), ("@ReSurf.address", ""), ("@ReSurf.closeTab", ""), ("@ReSurf.nextTab", ""), ("⇧↑ / ⇧↓", "previous / next tab"), ("⌘[ / ⌘]", "back / forward"),
+            (nil, [("@ReSurf.newWindow", ""), ("@ReSurf.newTab", ""), ("@ReSurf.address", ""), ("@ReSurf.closeTab", ""), ("@ReSurf.nextTab", ""),
+                   ("@ReSurf.tabUp / @ReSurf.tabDown", "previous / next tab"), ("@ReSurf.back / @ReSurf.forward", "back / forward"),
                    ("@ReSurf.reload", ""), ("@ReSurf.favourite", ""), ("@ReSurf.video", ""), ("@ReSurf.pageFull", ""), ("@ReSurf.info", "")]),
-            ("Search", [("← / →", "previous / next page"), ("↑ / ↓  Enter", "choose, open")]),
+            ("Search", [("@ReSurf.left / @ReSurf.right", "previous / next page"), ("@ReSurf.up / @ReSurf.down  @ReSurf.enter", "choose, open")]),
         ]),
         ("Re:Note", [
-            ("Notes", [("@ReNote.newWindow", ""), ("↑ / ↓", "select a note"), ("← / →", "another space"), ("N", "new note"), ("E / Enter", "edit"),
-                       ("/  ⌘F", "search"), ("Backspace", "delete"), ("Esc", "home")]),
-            ("A note", [("@ReNote.save", ""), ("Esc", "back")]),
-            ("Writing", [("@ReNote.highlight", ""), ("@ReNote.draw", ""), ("@ReNote.undo", ""), ("⌘⇧Z  ⌃Y", "redo")]),
+            ("Notes", [("@ReNote.newWindow", ""), ("@ReNote.up / @ReNote.down", "select a note"), ("@ReNote.left / @ReNote.right", "another space"),
+                       ("@ReNote.newNote", "new note"), ("@ReNote.edit / @ReNote.enter", "edit"),
+                       ("@ReNote.search  @ReNote.find", "search"), ("@ReNote.delete", "delete"), ("@ReNote.esc", "home")]),
+            ("A note", [("@ReNote.save", ""), ("@ReNote.esc", "back")]),
+            ("Writing", [("@ReNote.highlight", ""), ("@ReNote.draw", ""), ("@ReNote.undo", ""), ("@ReNote.redo  @ReNote.redoY", "redo")]),
             ("Drawing", [("drag", "draw"), ("⌥ drag", "rub out")]),
         ]),
         ("Re:Term", [
-            (nil, [("@ReTerm.newWindow", ""), ("⌘⇧T / C", "TERM / CHAT"), ("@ReTerm.wholeWindow", ""), ("@ReTerm.newConversation", ""),
-                   ("⇧↑ / ⇧↓", "the conversation above / below"), ("⇧⌘⌫", "delete the conversation")]),
-            ("TERM", [("↑ / ↓", "the commands before"), ("Tab", "complete"), ("⌃C", "stop / clear the line"), ("⌃D", "end of input"),
-                      ("⌃Z", "suspend"), ("⌘= / ⌘- / ⌘0", "text size")]),
-            ("CHAT", [("Enter", "send"), ("⇧Enter", "new line"), ("Tab", "Claude / Codex"), ("Esc", "stop the answer"), ("↑ / ↓", "what was said before")]),
+            (nil, [("@ReTerm.newWindow", ""), ("@ReTerm.term / @ReTerm.chat", "TERM / CHAT"), ("@ReTerm.wholeWindow", ""), ("@ReTerm.newConversation", ""),
+                   ("@ReTerm.conversationUp / @ReTerm.conversationDown", "the conversation above / below"), ("@ReTerm.deleteConversation", "")]),
+            ("TERM", [("@ReTerm.up / @ReTerm.down", "the commands before"), ("@ReTerm.tab", "complete"), ("@ReTerm.stop", ""), ("@ReTerm.end", ""),
+                      ("@ReTerm.suspend", ""), ("@ReTerm.bigger / @ReTerm.smaller / @ReTerm.actualSize", "text size")]),
+            ("CHAT", [("@ReTerm.send", ""), ("@ReTerm.newLine", ""), ("@ReTerm.tab", "the next provider"), ("@ReTerm.esc", ""),
+                      ("@ReTerm.up / @ReTerm.down", "what was said before")]),
         ]),
     ]
 
@@ -5237,11 +5380,12 @@ final class KeysPopup: Popup {
         // Esc: left as it was; ⌫: its own again
         if flags.isEmpty && key == kVK_Escape { return stopRecording() }
         if flags.isEmpty && (key == kVK_Delete || key == kVK_ForwardDelete) {
-            take(own.standard, for: own)
+            take(own.standard, for: own, asItCame: true)
             return stopRecording()
         }
-        // a key alone (or with ⇧ only) would be taken from whatever is typed: ⌘, ⌃ or ⌥ with it
-        guard !flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty else { return NSSound.beep() }
+        // a key alone (or with ⇧ only) only for one that came alone (N, Space, the arrows…): the others want ⌘, ⌃ or ⌥
+        let alone: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate]
+        guard !flags.intersection(alone).isEmpty || own.standard.flags.intersection(alone).isEmpty else { return NSSound.beep() }
         guard take(Shortcut(key: key, flags: flags), for: own) else { return NSSound.beep() }
         stopRecording()
     }
@@ -5249,8 +5393,10 @@ final class KeysPopup: Popup {
     /// the keys become this one's; another of its neighbours that had them gets this one's old ones (the two
     /// trade). An app's key can't be one of the desk's: the desk would take it first.
     @discardableResult
-    private func take(_ shortcut: Shortcut, for own: Settable) -> Bool {
-        if case .app = own, DeskKey.allCases.contains(where: { $0.shortcut == shortcut }) { return false }
+    private func take(_ shortcut: Shortcut, for own: Settable, asItCame: Bool = false) -> Bool {
+        // (the desk's letters only work with nothing but the desk in front, where no app's key is pressed; a key
+        // given back as it came is always taken)
+        if case .app = own, !asItCame, DeskKey.allCases.contains(where: { !$0.deskOnly && $0.shortcut == shortcut }) { return false }
         if let other = own.neighbours.first(where: { $0.shortcut == shortcut }) {
             other.shortcut = own.shortcut
         }
@@ -5280,9 +5426,37 @@ final class KeysPopup: Popup {
 
     /// a key and what it does: the key on the left (one's own: a click sets it), the words on the right
     private func line(_ key: String, _ what: String) -> NSView {
-        let own = key.hasPrefix("@") ? Settable(String(key.dropFirst())) : nil
-        let left: NSView = own.map(setter) ?? keys(key)
-        let line = NSStackView(views: [left, NSView(), words(own?.title ?? what, size: 14)])
+        let parts = key.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let owns = parts.compactMap { $0.hasPrefix("@") ? Settable(String($0.dropFirst())) : nil }
+        let left: NSView
+        if owns.isEmpty {
+            left = keys(key)
+        } else if parts.count == 1, let own = owns.first {
+            left = setter(own)
+        } else {
+            // several keys, each set by itself, with the words between them ("/") as they are
+            let row = NSStackView(views: parts.filter { !$0.isEmpty }.map { part in
+                part.hasPrefix("@") ? (Settable(String(part.dropFirst())).map(setter) ?? keys(part)) : keys(part)
+            })
+            row.orientation = .horizontal
+            row.alignment = .firstBaseline
+            row.spacing = 6
+            left = row
+        }
+        let title = what.isEmpty ? (owns.first?.title ?? "") : what
+        // four keys or more (the arrows, the arrangements): the keys on their own line, the words under them
+        if owns.count >= 4 {
+            let under = NSStackView(views: [NSView(), words(title, size: 14)])
+            under.orientation = .horizontal
+            under.alignment = .firstBaseline
+            let both = NSStackView(views: [left, under])
+            both.orientation = .vertical
+            both.alignment = .leading
+            both.spacing = 4
+            under.widthAnchor.constraint(equalTo: both.widthAnchor).isActive = true
+            return both
+        }
+        let line = NSStackView(views: [left, NSView(), words(title, size: 14)])
         line.orientation = .horizontal
         line.alignment = .firstBaseline
         line.spacing = 12
