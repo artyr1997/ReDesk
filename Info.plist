@@ -16,7 +16,6 @@
 	<key>NSAppleEventsUsageDescription</key><string>ReDesk switches the Mac between light and dark (⌘⇧T) through System Events.</string>
 	<key>NSLocationUsageDescription</key><string>The dashboard (⌃⌥D) shows the Wi-Fi networks' names, which macOS gives only to apps allowed Location. Where you are is never read or kept.</string>
 	<key>NSLocationWhenInUseUsageDescription</key><string>The dashboard (⌃⌥D) shows the Wi-Fi networks' names, which macOS gives only to apps allowed Location. Where you are is never read or kept.</string>
-	<key>NSMicrophoneUsageDescription</key><string>ReDesk listens for a snap of the fingers to lock the screen. Nothing is recorded or kept.</string>
 	<key>NSAudioCaptureUsageDescription</key><string>ReDesk listens to how loud the Mac is playing to move the sound wave. Nothing is recorded or kept.</string>
 </dict>
 </plist>
