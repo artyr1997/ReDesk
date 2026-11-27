@@ -122,3 +122,7 @@ How it is made, in detail: [docs/DETAILS.md](docs/DETAILS.md).
 ## Support
 
 re: space is made by one person, slowly and with care. If it makes your days a little calmer, you can [buy me a coffee on Ko-fi](https://ko-fi.com/artursavytskyi).
+
+## License
+
+[MIT](LICENSE) © 2026 Artur Savytskyi. Security reports: see [SECURITY.md](SECURITY.md).
