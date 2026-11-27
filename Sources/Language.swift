@@ -13,6 +13,7 @@ enum Language: String, CaseIterable {
         get { Language(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .english }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: key)
+            share()
             NotificationCenter.default.post(name: changed, object: nil)
             // the Re apps write their buttons in it too
             DistributedNotificationCenter.default().postNotificationName(
@@ -21,6 +22,15 @@ enum Language: String, CaseIterable {
     }
 
     static var isJapanese: Bool { current == .japanese }
+
+    /// The language, for the Re apps to read at their start: a file of the suite's own
+    /// (Application Support/ReSpace/language), not ReDesk's settings, which macOS guards as another app's data
+    /// (it would ask each time an app read them).
+    static func share() {
+        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ReSpace/language")
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? current.rawValue.write(to: file, atomically: true, encoding: .utf8)
+    }
 
     /// ⌘J: the other one; an open popup is written again in it
     static func toggle() {

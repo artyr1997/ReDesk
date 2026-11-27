@@ -5102,6 +5102,8 @@ final class Desk: NSObject, NSApplicationDelegate {
         }
         CommandKeys.install()
         LidLight.shared.start()
+        // the language where the Re apps read it
+        Language.share()
         // each time ReDesk starts: the guide
         GuidePopup.whenStarting()
         Desktops.shared.start()
